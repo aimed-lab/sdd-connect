@@ -138,27 +138,50 @@ export default function ProjectTasksView({
     <div className="flex flex-col gap-7">
       {lists.map((l) => {
         const pct = l.total === 0 ? 0 : Math.round((l.done / l.total) * 100);
+        const dues = l.rows.map((r) => r.due);
+        const sharedDue = dues.length > 0 && dues[0] && dues.every((d) => d === dues[0]) ? dueLabel(dues[0]) : null;
+
+        if (l.rows.length === 0 && adding !== l.key) {
+          return (
+            <section key={l.key} aria-label={l.title} className="flex items-baseline justify-between gap-3 border-t border-[#e2dfd6] pt-3">
+              <h3 className="font-title text-[18px] leading-6 text-on-background">{l.title}</h3>
+              <span className="text-[12.5px] leading-5 text-secondary">
+                No tasks yet
+                {canEdit && (
+                  <>
+                    {" · "}
+                    <button type="button" onClick={() => setAdding(l.key)} className="text-[#1A5632] hover:text-[#033319] hover:underline underline-offset-4">
+                      + Add
+                    </button>
+                  </>
+                )}
+              </span>
+            </section>
+          );
+        }
+
         return (
           <section key={l.key} aria-label={l.title} className="flex flex-col gap-3">
             <div>
               <div className="flex items-baseline justify-between gap-3">
-                <h3 className="font-title text-[18px] leading-6 text-on-background">{l.title}</h3>
+                <h3 className="font-title text-[18px] leading-6 text-on-background">
+                  {l.title}
+                  {sharedDue && <span className="ml-1.5 font-body-md text-[12.5px] text-secondary">· due {sharedDue}</span>}
+                </h3>
                 <span className="text-[12.5px] leading-5 text-secondary">{barLine(l.done, l.total)}</span>
               </div>
-              <div className="mt-1.5 h-1.5 rounded-full bg-surface-container overflow-hidden" role="progressbar" aria-label={`${l.title} progress`} aria-valuemin={0} aria-valuemax={l.total} aria-valuenow={l.done}>
-                <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+              <div className="mt-1.5 h-1 rounded-full bg-[#e9e6dc] overflow-hidden" role="progressbar" aria-label={`${l.title} progress`} aria-valuemin={0} aria-valuemax={l.total} aria-valuenow={l.done}>
+                <div className="h-full bg-[#1A5632]" style={{ width: `${pct}%` }} />
               </div>
             </div>
 
-            {l.rows.length === 0 && adding !== l.key && <p className="font-body-md text-body-md text-secondary">Nothing here yet.</p>}
-
-            <ul className="flex flex-col gap-2">
-              {l.rows.map((r) => {
+            <ul className="rounded-[10px] border border-[#e2dfd6] bg-white divide-y divide-[#ece9e0]">
+              {l.rows.map((r, idx) => {
                 const key = r.id ?? r.taskKey ?? r.label;
                 const mark = canMarkItem(role, l.key);
                 if (editing === r.id && r.id) {
                   return (
-                    <li key={key}>
+                    <li key={key} className="p-2.5">
                       <ItemForm
                         initial={{ label: r.label, due: r.due ?? "", assigneeId: r.owner ? ownerIdByName[r.owner] ?? "" : "" }}
                         owners={owners}
@@ -170,34 +193,56 @@ export default function ProjectTasksView({
                   );
                 }
                 return (
-                  <li key={key} className="rounded-2xl border border-[#e8e4da] bg-white px-3.5 py-3 flex items-start gap-3">
+                  <li key={key} className="px-3.5 py-3 flex flex-wrap items-start gap-x-3 gap-y-2">
                     <span
                       className={
-                        "grid place-items-center shrink-0 w-7 h-7 mt-0.5 rounded-full border-2 text-[13px] font-extrabold " +
-                        (r.done ? "bg-primary border-primary text-on-primary" : "bg-white border-outline-variant text-transparent")
+                        "grid place-items-center shrink-0 w-6 h-6 rounded-full text-[12px] font-bold " +
+                        (r.done ? "bg-[#1A5632] text-white" : "bg-[#f3f1ea] text-[#222]")
                       }
                       aria-hidden
                     >
-                      ✓
+                      {r.done ? (
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M5 12.5l4.5 4.5L19 7.5" />
+                        </svg>
+                      ) : (
+                        idx + 1
+                      )}
                     </span>
-                    <div className="min-w-0 flex-1">
-                      <p className={"font-label-lg text-[14.5px] leading-6 font-bold break-words " + (r.done ? "text-secondary" : "text-on-background")}>{r.label}</p>
-                      {r.description && <p className="font-body-md text-[13px] leading-5 text-secondary line-clamp-2">{r.description}</p>}
-                      <p className="mt-0.5 text-[12px] leading-5 text-secondary">
+                    <div className="min-w-0 flex-1 basis-[60%]">
+                      <p className={"text-[14px] leading-6 break-words " + (r.done ? "text-secondary line-through" : "text-on-background")}>
                         <span className="sr-only">{r.done ? "Done. " : "To do. "}</span>
-                        {r.owner ? `${r.owner} · ` : ""}
-                        {r.due ? `Due ${dueLabel(r.due) ?? r.due}` : "No due date"}
+                        {r.label}
                       </p>
+                      {((!r.done && r.description) || r.owner || (!sharedDue && r.due)) && (
+                        <p className="text-[12px] leading-5 text-secondary">
+                          {!r.done && r.description && <span className="line-clamp-2">{r.description}</span>}
+                          {[r.owner, !sharedDue && r.due ? `Due ${dueLabel(r.due) ?? r.due}` : null].filter(Boolean).join(" · ")}
+                        </p>
+                      )}
                     </div>
-                    {mark && (
+                    {mark && !r.done && (
                       <button
                         type="button"
                         onClick={() => toggle(r)}
                         disabled={busy !== null}
-                        className={"shrink-0 rounded-[9px] px-3 py-1.5 text-[12px] font-bold leading-4 disabled:opacity-60 " + (r.done ? "btn-outline" : "btn-primary")}
+                        className="shrink-0 rounded-md border border-[#1A5632] bg-transparent px-2.5 py-1 text-[12px] font-semibold leading-4 text-[#1A5632] hover:bg-[#f3f1ea] disabled:opacity-60 max-sm:ml-9"
                       >
-                        {busy === key ? "…" : r.done ? "Undo" : "Mark done"}
+                        {busy === key ? "…" : "Mark as done"}
                       </button>
+                    )}
+                    {r.done && (
+                      <span className="shrink-0 text-[12px] leading-5 text-secondary max-sm:ml-9">
+                        <span className="font-semibold text-[#1A5632]">Done</span>
+                        {mark && (
+                          <>
+                            {" · "}
+                            <button type="button" onClick={() => toggle(r)} disabled={busy !== null} className="underline underline-offset-2 hover:text-on-background disabled:opacity-60">
+                              {busy === key ? "…" : "Undo"}
+                            </button>
+                          </>
+                        )}
+                      </span>
                     )}
                     {canEdit && r.id && !r.taskKey && (
                       <MoreMenu
@@ -228,7 +273,7 @@ export default function ProjectTasksView({
                   <button
                     type="button"
                     onClick={() => setAdding(l.key)}
-                    className="font-label-md text-label-md text-primary hover:underline underline-offset-4"
+                    className="text-[13px] font-semibold leading-5 text-[#1A5632] hover:text-[#033319] hover:underline underline-offset-4"
                   >
                     + Add task
                   </button>

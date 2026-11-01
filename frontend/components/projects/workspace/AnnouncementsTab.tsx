@@ -238,9 +238,9 @@ export default function AnnouncementsTab({
               <button
                 type="button"
                 onClick={() => setForm("announcement")}
-                className="btn-primary inline-flex items-center gap-2 px-6 py-3 rounded-lg font-label-md text-label-md"
+                className="inline-flex items-center gap-1.5 rounded-md border border-[#1A5632] bg-transparent px-3 py-1.5 text-[13px] font-semibold leading-5 text-[#1A5632] hover:bg-[#f3f1ea] transition-colors"
               >
-                <span className="material-symbols-outlined text-[20px]">add</span>
+                <span className="material-symbols-outlined text-[18px]">add</span>
                 Post an announcement
               </button>
             )}
