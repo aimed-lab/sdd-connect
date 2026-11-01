@@ -32,6 +32,16 @@ const SECTION_TITLE: Record<ProjectView, string> = {
   manage: "Manage",
 };
 
+// Breadcrumb names (the section title below the header keeps SECTION_TITLE).
+const SECTION_TITLE_SHORT: Record<ProjectView, string> = {
+  tasks: "Tasks",
+  files: "Files",
+  announcements: "Announcements",
+  team: "Team",
+  timeline: "Timeline",
+  manage: "Manage",
+};
+
 const TILE =
   "relative text-center min-w-0 flex flex-col items-center basis-[calc((100%-20px)/3)] grow-0 shrink-0 rounded-2xl bg-white px-1.5 pt-4 pb-3.5 " +
   "transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2";
@@ -104,70 +114,88 @@ export default function ColabofestProject({
   tiles.push({ key: "timeline", label: "Timeline", icon: <IconClock /> });
   if (showManage) tiles.push({ key: "manage", label: "Manage", icon: <IconSettings />, dashed: true });
 
-  const compact = !!view;
+  // Same source as the home hero label ("ColaboFest 2026 · C-108"): the project code is its C-### part.
+  const projectCode = label?.match(/\bC-\d+\b/)?.[0] ?? null;
 
   return (
     <div className="mx-auto w-full max-w-[720px] flex flex-col gap-4">
-      {/* quiet top row */}
-      <div className="flex items-center justify-between gap-3 text-[12.5px] leading-5 text-secondary">
-        <span className="truncate">Welcome, {firstName}</span>
-        <Link href="/projects" className="inline-flex items-center gap-1 shrink-0 hover:text-primary transition-colors">
-          <IconArrowLeft size={14} /> My projects
-        </Link>
-      </div>
-
-      {/* hero */}
-      <header className={`rounded-[20px] bg-primary text-on-primary ${compact ? "px-5 py-4" : "px-5 py-5 sm:px-7 sm:py-6"}`}>
-        {!compact && (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] leading-4 font-bold tracking-[0.1em] opacity-80 break-words">{(label || "ColaboFest 2026").toUpperCase()}</span>
-            {finalist && <span className="rounded-full bg-white px-2.5 py-0.5 text-[11.5px] font-bold leading-4 text-primary">★ Finalist</span>}
-          </div>
-        )}
-        <h1 className={`font-title text-on-primary break-words ${compact ? "text-[20px] leading-6" : "mt-2 text-[26px] sm:text-[32px] leading-[1.15]"}`}>{name}</h1>
-        {!compact && (
-          <div className="mt-3.5 flex items-center gap-2.5 text-[13px]">
-            <div className="flex -space-x-1.5" aria-hidden>
-              {memberNames.slice(0, 5).map((n, i) => (
-                <span key={i} className="grid place-items-center w-6 h-6 rounded-full bg-white text-primary border-2 border-primary text-[9px] font-bold">
-                  {initials(n)}
-                </span>
-              ))}
+      {/* SECTION VIEW: one-line breadcrumb header */}
+      {view && (
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-[#e2dfd6] pb-2.5 text-[13px] leading-5">
+          <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 min-w-0">
+            <Link href={base} className="inline-flex items-center gap-1.5 font-semibold text-[#1A5632] hover:text-[#033319] hover:underline underline-offset-4">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M3 11.5 12 4l9 7.5" />
+                <path d="M5 10v10h5v-6h4v6h5V10" />
+              </svg>
+              Project home
+            </Link>
+            <span className="text-[#9a9a94]" aria-hidden>
+              ›
+            </span>
+            <span className="text-on-background truncate">{SECTION_TITLE_SHORT[view]}</span>
+          </nav>
+          {(projectCode || finalist) && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {projectCode && <span className="rounded-full bg-[#f3f1ea] px-2.5 py-0.5 text-[11.5px] font-semibold leading-4 text-[#4a4a46]">{projectCode}</span>}
+              {finalist && <span className="rounded-full border border-[#1A5632] px-2.5 py-0.5 text-[11.5px] font-semibold leading-4 text-[#1A5632]">★ Finalist</span>}
             </div>
-            {memberCount} {memberCount === 1 ? "member" : "members"}
-          </div>
-        )}
-      </header>
-
-      {/* ⌂ Project home · next key date */}
-      <div className="flex items-center justify-between gap-3 border-b border-[#e8e4da] pb-2.5 text-[13px] leading-5">
-        <Link href={base} className="inline-flex items-center gap-1.5 font-semibold text-primary hover:underline underline-offset-4">
-          <span aria-hidden>⌂</span> Project home
-        </Link>
-        {nextDate && (
-          <span className="text-secondary truncate">
-            {nextDate.shown} · {nextDate.label}
-          </span>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {/* HOME */}
       {!view && (
         <>
+          {/* quiet top row */}
+          <div className="flex items-center justify-between gap-3 text-[12.5px] leading-5 text-secondary">
+            <span className="truncate">Welcome, {firstName}</span>
+            <Link href="/projects" className="inline-flex items-center gap-1 shrink-0 hover:text-primary transition-colors">
+              <IconArrowLeft size={14} /> My projects
+            </Link>
+          </div>
+
+          {/* hero */}
+          <header className="rounded-[20px] bg-primary text-on-primary px-5 py-5 sm:px-7 sm:py-6">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] leading-4 font-bold tracking-[0.1em] opacity-80 break-words">{(label || "ColaboFest 2026").toUpperCase()}</span>
+              {finalist && <span className="rounded-full bg-white px-2.5 py-0.5 text-[11.5px] font-bold leading-4 text-primary">★ Finalist</span>}
+            </div>
+            <h1 className="font-title text-on-primary break-words mt-2 text-[26px] sm:text-[32px] leading-[1.15]">{name}</h1>
+            <div className="mt-3.5 flex items-center gap-2.5 text-[13px]">
+              <div className="flex -space-x-1.5" aria-hidden>
+                {memberNames.slice(0, 5).map((n, i) => (
+                  <span key={i} className="grid place-items-center w-6 h-6 rounded-full bg-white text-primary border-2 border-primary text-[9px] font-bold">
+                    {initials(n)}
+                  </span>
+                ))}
+              </div>
+              {memberCount} {memberCount === 1 ? "member" : "members"}
+            </div>
+          </header>
+
+          {/* ⌂ Project home · next key date */}
+          {finalist && nextDate && (
+            <div className="flex items-center justify-end gap-3 border-b border-[#e8e4da] pb-2.5 text-[13px] leading-5">
+              <span className="text-secondary truncate">
+                {nextDate.shown} · {nextDate.label}
+              </span>
+            </div>
+          )}
           {cta && (
             <Link
               href={`${base}?view=tasks`}
              
-              className="rounded-[18px] bg-primary text-on-primary px-4 py-3.5 flex items-center gap-3.5 hover:bg-[#033319] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+              className="rounded-[18px] bg-[#f3f1ea] border border-[#e2dfd6] px-4 py-3.5 flex items-center gap-3.5 hover:border-[#1A5632] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1A5632] focus-visible:ring-offset-2"
             >
-              <span className="grid place-items-center shrink-0 w-11 h-11 rounded-xl bg-white/15" aria-hidden>
+              <span className="grid place-items-center shrink-0 w-11 h-11 rounded-xl bg-white text-[#1A5632]" aria-hidden>
                 <IconChecklist size={22} />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block text-[15px] leading-5 font-bold">{cta.title}</span>
-                <span className="block text-[12.5px] leading-5 opacity-85">{cta.sub}</span>
+                <span className="block text-[15px] leading-5 font-bold text-[#222]">{cta.title}</span>
+                <span className="block text-[12.5px] leading-5 text-secondary">{cta.sub}</span>
               </span>
-              <span className="text-[20px] leading-none shrink-0" aria-hidden>
+              <span className="text-[20px] leading-none shrink-0 text-[#1A5632]" aria-hidden>
                 →
               </span>
             </Link>
@@ -317,11 +345,6 @@ export default function ColabofestProject({
         <div>
           <h2 className="font-title text-[15px] leading-6 text-on-background mb-1">Quick links</h2>
           <ul className="flex flex-col gap-0.5">
-            <li>
-              <Link href={base} className="text-primary hover:underline underline-offset-4">
-                Project home
-              </Link>
-            </li>
             <li>
               <Link href="/projects" className="text-primary hover:underline underline-offset-4">
                 My projects
