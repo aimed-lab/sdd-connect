@@ -1,6 +1,6 @@
 "use client";
 
-// The homepage "Explore the hub" map: six colored lines drawn like a metro map,
+// The homepage "Explore the hub" map: five colored lines drawn like a metro map,
 // all passing through one central interchange (SmartDrugDiscovery). Plain inline
 // SVG, no libraries. Every stop is a link; links that leave the site open in a
 // new tab and show a ↗.
@@ -13,9 +13,6 @@
 //   * Every bend is 45°. Stations sit on straight segments, never on a bend.
 //   * Labels go on the free side of their line: above for Papers and Events,
 //     below for People, left for Funding & trials, right for Tools.
-//   * SPARC picks is the thicker coral line, drawn on top. It starts at the bottom
-//     of the hub, drops through the free corridor between the two verticals
-//     (x = 600) and runs left along y = 735, where its three stops sit (labels below).
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
@@ -40,7 +37,6 @@ interface MapLine {
   stations: Station[];
 }
 
-const SDDS = "https://wiki.smartdrugdiscovery.org/sdds-2026";
 const isExternal = (href: string) => /^https?:\/\//.test(href);
 
 // Label gets a ↗ and the stop opens in a new tab when the link leaves the site.
@@ -49,41 +45,42 @@ function st(label: string, x: number, y: number, side: Side, href: string): Stat
   return { label: [external ? `${label} ↗` : label], x, y, side, href, external };
 }
 
+// Every stop is a TYPE of asset, one level, never one of our own activities.
 const LINES: MapLine[] = [
   {
     id: "papers",
-    name: "Papers",
+    name: "Literature",
     color: "#2563eb",
     path: "M100 296 H300 L380 376 H820 L900 296 H1140",
     stations: [
-      st("Ask AI", 100, 296, "above", "/explore"),
-      st("Latest papers", 260, 296, "above", "/explore?category=paper"),
-      st("Our lab's papers", 960, 296, "above", "/sparc#publications"),
-      st("News", 1140, 296, "above", "/explore?category=news"),
+      st("Papers", 100, 296, "above", "/explore?category=paper"),
+      st("Preprints", 260, 296, "above", "/explore?category=preprint"),
+      st("News", 960, 296, "above", "/explore?category=news"),
+      st("Podcasts", 1140, 296, "above", "/explore/podcast"),
     ],
   },
   {
     id: "data",
-    name: "Funding & trials",
+    name: "Funding & regulatory",
     color: "#CA8A04",
     path: "M465 110 V180 L545 260 V540 L465 620 V690",
     stations: [
       st("Grants", 465, 110, "left", "/explore?category=grant"),
       st("Clinical trials", 545, 300, "left", "/explore?category=trial"),
       st("FDA approvals", 545, 500, "left", "/explore?category=approval"),
-      st("Preprints", 465, 690, "left", "/explore?category=preprint"),
+      st("Patents", 465, 690, "left", "/sparc#patents"),
     ],
   },
   {
     id: "tools",
-    name: "Tools",
+    name: "Tools & data",
     color: "#1A5632",
     path: "M735 110 V180 L655 260 V540 L735 620 V690",
     stations: [
-      st("Tools & datasets", 735, 110, "right", "/explore?category=tool"),
-      st("PAGER", 655, 300, "right", "https://aimed-lab.shinyapps.io/PAGERwebapp/"),
-      st("Talent Knowledge Map", 655, 500, "right", "https://bridge2ai.labs-app.com/"),
-      st("CM4AI datasets", 735, 690, "right", "/sparc#datasets"),
+      st("Tools", 735, 110, "right", "/explore?category=tool"),
+      st("Datasets", 655, 300, "right", "/explore?category=dataset"),
+      st("Lab resources", 655, 500, "right", "/collaborate#resources"),
+      st("Wiki pages", 735, 690, "right", "/pages"),
     ],
   },
   {
@@ -92,10 +89,10 @@ const LINES: MapLine[] = [
     color: "#9333ea",
     path: "M100 400 H1140",
     stations: [
-      st("ColaboFest 2026", 100, 400, "above", "/promote/conference-or-talk-zfnlb"),
-      st("SDDS 2026", 260, 400, "above", SDDS),
-      st("Promote your work", 960, 400, "above", "/promote"),
-      st("CFDE Fall 2026", 1140, 400, "above", "https://portal.cfdeconnect.org/meetings/fall-2026"),
+      st("Conferences", 100, 400, "above", "/events#conferences"),
+      st("Contests", 260, 400, "above", "/events#contests"),
+      st("Talks & slides", 960, 400, "above", "/promote?type=talk"),
+      st("Achievements", 1140, 400, "above", "/promote?type=achievement"),
     ],
   },
   {
@@ -106,34 +103,18 @@ const LINES: MapLine[] = [
     stations: [
       st("Communities", 100, 504, "below", "/communities"),
       st("Teams", 260, 504, "below", "https://project.smartdrugdiscovery.org"),
-      st("Join SPARC Investigators", 960, 504, "below", "/communities/sparc-investigators"),
-      st("OSDD-2", 1140, 504, "below", "https://www.smartdrugdiscovery.org/post/osdd2"),
+      st("Collaboration posts", 960, 504, "below", "/collaborate"),
+      st("Researchers", 1140, 504, "below", "https://bridge2ai.labs-app.com/"),
     ],
   },
 ];
 
-const ROUTE_ID = "sparc-picks";
-const ROUTE_COLOR = "#C2410C";
-
-// Starts at the hub and runs down to its three stops at the bottom left.
-const ROUTE: MapLine = {
-  id: ROUTE_ID,
-  name: "SPARC picks",
-  color: ROUTE_COLOR,
-  path: "M600 445 V670 L535 735 H120",
-  stations: [
-    st("Podcast", 120, 735, "below", "/explore/podcast"),
-    st("SPARC tools", 280, 735, "below", "/sparc#tools"),
-    st("Patents", 440, 735, "below", "/sparc#patents"),
-  ],
-};
-
-const ALL_LINES: MapLine[] = [...LINES, ROUTE];
+const ALL_LINES: MapLine[] = LINES;
 
 const VIEW_X = -20;
 const VIEW_W = 1300;
 const VIEW_Y = 0;
-const VIEW_H = 785;
+const VIEW_H = 740;
 const HUB_X = 600; // centre of the interchange pill
 const R = 12; // station radius
 const LABEL_GAP = 24;
@@ -151,6 +132,16 @@ function labelPlacement(s: Station) {
     case "right":
       return { x: s.x + LABEL_GAP, y: s.y + 5 - ((n - 1) * lh) / 2, anchor: "start" as const };
   }
+}
+
+// Rough text width (16px semibold) so the hit box can cover the label.
+function hitArea(s: Station, p: { x: number; y: number; anchor: "start" | "middle" | "end" }) {
+  const w = Math.max(...s.label.map((l) => l.length)) * 9.5 + 12;
+  const PAD = 30; // half of a 60-unit-tall target (about 46px on a phone)
+  if (s.side === "above") return { x: s.x - w / 2, y: p.y - 22, w, h: s.y + PAD - (p.y - 22) };
+  if (s.side === "below") return { x: s.x - w / 2, y: s.y - PAD, w, h: p.y + 8 - (s.y - PAD) };
+  const x0 = s.side === "left" ? s.x - LABEL_GAP - w : s.x - 24;
+  return { x: x0, y: s.y - PAD, w: w + LABEL_GAP + 24, h: PAD * 2 };
 }
 
 // Plain anchor for stations that leave the site: new tab, no opener.
@@ -171,6 +162,7 @@ function StationNode({
 }) {
   const [grow, setGrow] = useState(false);
   const p = labelPlacement(station);
+  const hit = hitArea(station, p);
   const name = station.label.join(" ");
   const Wrapper = station.external ? ExternalLink : Link;
   return (
@@ -195,8 +187,9 @@ function StationNode({
       }}
       className="outline-none cursor-pointer"
     >
-      {/* Generous invisible hit area so the stop is easy to tap on a phone. */}
-      <circle cx={station.x} cy={station.y} r={22} fill="transparent" />
+      {/* The whole stop (circle + label) is one generous hit area, at least 44px tall
+          on a phone, so tapping the label works as well as tapping the circle. */}
+      <rect x={hit.x} y={hit.y} width={hit.w} height={hit.h} rx={10} fill="transparent" />
       <g
         style={{
           transform: grow ? "scale(1.3)" : "scale(1)",
@@ -214,7 +207,6 @@ function StationNode({
         fontSize={16}
         fontWeight={600}
         fill={grow ? "#033319" : "#191c1e"}
-        style={{ pointerEvents: "none" }}
       >
         {station.label.map((l, i) => (
           <tspan key={l} x={p.x} dy={i === 0 ? 0 : 17} fontSize={i === 0 ? 16 : 14}>
@@ -248,12 +240,12 @@ export default function DiscoveryMap() {
         <svg
           viewBox={`${VIEW_X} ${VIEW_Y} ${VIEW_W} ${VIEW_H}`}
           role="group"
-          aria-label="Map of the hub: six lines, Papers, Funding and trials, Tools, Events, People and SPARC picks, all meeting at SmartDrugDiscovery"
+          aria-label="Map of the hub: five lines, Literature, Funding and regulatory, Tools and data, Events and People, all meeting at SmartDrugDiscovery"
           className="block w-full min-w-[1000px] h-auto md:max-h-[calc(100vh-165px)]"
         >
-          {/* Lines (the SPARC picks line last, so it sits on top) */}
+          {/* Lines */}
           {ALL_LINES.map((line) => {
-            const isRoute = line.id === ROUTE_ID;
+          
             const on = hover === line.id;
             return (
               <path
@@ -261,7 +253,7 @@ export default function DiscoveryMap() {
                 d={line.path}
                 fill="none"
                 stroke={line.color}
-                strokeWidth={(isRoute ? 13 : 10) + (on ? 4 : 0)}
+                strokeWidth={10 + (on ? 4 : 0)}
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 style={{ transition: "stroke-width 150ms ease" }}
@@ -333,6 +325,12 @@ export default function DiscoveryMap() {
           </li>
         ))}
       </ul>
+
+      <p className="mt-3 text-center">
+        <Link href="/sparc" className="text-sm text-secondary hover:text-primary hover:underline underline-offset-4">
+          SPARC Center resources →
+        </Link>
+      </p>
     </div>
   );
 }

@@ -315,7 +315,7 @@ export default async function CollaboratePage({
       )}
 
       {/* Shared lab resources */}
-      <section className="mt-16 pt-10 border-t border-[#e7e4dc]">
+      <section id="resources" className="mt-16 pt-10 border-t border-[#e7e4dc] scroll-mt-20">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <SectionHeading
             title="Shared lab resources"
