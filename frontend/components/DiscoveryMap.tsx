@@ -81,8 +81,8 @@ const LINES: MapLine[] = [
     path: "M735 110 V180 L655 260 V540 L735 620 V690",
     stations: [
       st("Tools & datasets", 735, 110, "right", "/explore?category=tool"),
-      st("PAGER", 655, 300, "right", "https://github.com/aimed-lab/PAGER-Web-APP"),
-      st("Talent Knowledge Map", 655, 500, "right", "http://cm4aikg.vercel.app/"),
+      st("PAGER", 655, 300, "right", "https://aimed-lab.shinyapps.io/PAGERwebapp/"),
+      st("Talent Knowledge Map", 655, 500, "right", "https://bridge2ai.labs-app.com/"),
       st("CM4AI datasets", 735, 690, "right", "/sparc#datasets"),
     ],
   },
