@@ -1,8 +1,7 @@
 // Landing page ("/") — the BioTechX Europe pitch: open source drug discovery,
 // an open network where researchers build projects. The hero presents the hub
-// and its three functions (Explore, Collaborate, Promote, same words as the nav). PHGDH in Alzheimer's is the worked example:
-// the coral route on the clickable DiscoveryMap plus the grouped step list under
-// it; its links all live in lib/phgdhRoute.ts. Uses the shared design
+// and its three functions (Explore, Collaborate, Promote, same words as the nav). "Explore the hub" is the
+// clickable DiscoveryMap: five lines, every stop a real page. Uses the shared design
 // tokens (tailwind.config.ts) and the .btn-primary class from globals.css. Nav
 // + Footer come from the root layout.
 //
@@ -21,7 +20,6 @@
 import Link from "next/link";
 import FlywheelSection from "@/components/FlywheelSection";
 import DiscoveryMap from "@/components/DiscoveryMap";
-import PhgdhRouteList from "@/components/PhgdhRouteList";
 import NewsTile from "@/components/explore/NewsTile";
 import { rankNews } from "@/lib/newsLead";
 import LockedNetworkCard from "@/components/LockedNetworkCard";
@@ -62,8 +60,6 @@ async function getEpisodeCount(): Promise<number | null> {
   }
 }
 
-
-
 const DARK = "bg-gradient-to-br from-on-primary-fixed to-on-primary-fixed-variant text-white";
 const WRAP = "max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop";
 
@@ -83,8 +79,8 @@ export default async function Home() {
               Open drug discovery in one hub.
             </h1>
             <p className="font-body-lg text-body-lg text-secondary">
-              Papers, data, tools and people in one place. See how it works with a real case:
-              PHGDH in Alzheimer&apos;s, from first papers to an open patent pilot.
+              Papers, grants, tools and people in one place, plus the SPARC Center&apos;s own
+              publications, tools and podcast.
             </p>
             <div className="flex flex-col sm:flex-row justify-center gap-3 pt-2">
               <Link
@@ -93,12 +89,6 @@ export default async function Home() {
               >
                 Start exploring →
               </Link>
-              <a
-                href="#phgdh-route"
-                className="px-8 py-3 rounded-lg font-label-md text-lg text-center border border-primary text-primary hover:bg-surface-container-low transition-colors"
-              >
-                Follow the PHGDH case ↓
-              </a>
             </div>
           </div>
         </div>
@@ -106,19 +96,18 @@ export default async function Home() {
 
       <FlywheelSection />
 
-      {/* a2. How it works: the PHGDH case, on the map */}
-      <section id="phgdh-route" className="bg-[var(--explore-bg)] scroll-mt-16">
+      {/* a2. Explore the hub: the map */}
+      <section id="hub-map" className="bg-[var(--explore-bg)] scroll-mt-16">
         <div className={`${WRAP} pb-12 md:pb-16`}>
           <div className="max-w-3xl mx-auto text-center mb-4">
             <h2 className="font-title text-[28px] md:text-[30px] leading-tight font-medium text-on-background">
-              How it works: the PHGDH case
+              Explore the hub
             </h2>
             <p className="mt-2 font-body-md text-body-md text-secondary">
-              Every line runs through the hub. The coral line is one real journey: PHGDH.
+              Every stop opens a real page. Start anywhere.
             </p>
           </div>
           <DiscoveryMap />
-          <PhgdhRouteList />
         </div>
       </section>
 
