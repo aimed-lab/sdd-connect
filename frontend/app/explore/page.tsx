@@ -139,8 +139,12 @@ function ExploreFeed() {
   const [failed, setFailed] = useState(false);
   // ?category=<kind> opens that kind's full list.
   const categoryScope = scopeFromParam(categoryParam);
-  const selected: string | null =
-    categoryScope !== "all"
+  // ?category=dataset(s) is its own datasets-only list (the scope picker still files
+  // datasets under "Tools & datasets" for searching).
+  const datasetsOnly = categoryParam === "dataset" || categoryParam === "datasets";
+  const selected: string | null = datasetsOnly
+    ? "dataset"
+    : categoryScope !== "all"
       ? categoryScope
       : categoryParam && CATEGORIES.some((c) => c.kind === categoryParam)
         ? categoryParam
@@ -384,11 +388,6 @@ function ExploreFeed() {
           ) : (
             <CommunitiesNear items={communities} />
           )
-        ) : selected === "tool" ? (
-          <div className="space-y-14">
-            {resourceView("tool")}
-            {resourceView("dataset")}
-          </div>
         ) : (
           selectedView(selected)
         )}
