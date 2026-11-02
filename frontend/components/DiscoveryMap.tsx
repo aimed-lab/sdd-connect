@@ -1,29 +1,24 @@
 "use client";
 
-// The homepage "drug discovery map": five colored lines drawn like a metro map,
+// The homepage "Explore the hub" map: six colored lines drawn like a metro map,
 // all passing through one central interchange (SmartDrugDiscovery). Plain inline
-// SVG, no libraries. Every station is a link; locked stations are dashed grey
-// with a lock and go to /invite.
+// SVG, no libraries. Every stop is a link; links that leave the site open in a
+// new tab and show a ↗.
 //
 // Geometry notes (viewBox units, 1 unit ~ 1px at desktop width):
-//   * Papers / Projects / People run horizontally through the interchange at
-//     y = 376 / 400 / 424. Data / Tools run vertically at x = 545 / 655. Only
-//     the interchange pill (drawn last) overlaps them, so the lines never cross
+//   * Papers / Events / People run horizontally through the interchange at
+//     y = 376 / 400 / 424. Funding & trials / Tools run vertically at x = 545 / 655.
+//     Only the interchange pill (drawn last) overlaps them, so the lines never cross
 //     anywhere else.
 //   * Every bend is 45°. Stations sit on straight segments, never on a bend.
-//   * Labels go on the free side of their line: above for Papers and Projects,
-//     below for People, left for Data, right for Tools.
-//   * The PHGDH case (lib/phgdhRoute.ts) is a sixth, thicker line in coral,
-//     drawn on top of the full network. It rises through the free corridor
-//     between the Data and Tools verticals (x = 600), so it crosses no other
-//     line. Stations 1-3 sit on its bottom-left run (labels below), stations
-//     4-6 on its top-right run (labels above), each numbered like the step list
-//     under the map. Default: everything at full strength. The toggle under the
-//     map fades the other lines to 15% and hides their labels.
+//   * Labels go on the free side of their line: above for Papers and Events,
+//     below for People, left for Funding & trials, right for Tools.
+//   * SPARC picks is the thicker coral line, drawn on top. It starts at the bottom
+//     of the hub, drops through the free corridor between the two verticals
+//     (x = 600) and runs left along y = 735, where its three stops sit (labels below).
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { isExternal, PHGDH_STEPS } from "@/lib/phgdhRoute";
 
 type Side = "above" | "below" | "left" | "right";
 
@@ -33,11 +28,8 @@ interface Station {
   y: number;
   side: Side;
   href: string;
-  locked?: boolean;
   /** Opens in a new tab (the label then shows a ↗). */
   external?: boolean;
-  /** Route step number, drawn on the station. */
-  number?: number;
 }
 
 interface MapLine {
@@ -48,12 +40,14 @@ interface MapLine {
   stations: Station[];
 }
 
-const LOCKED_HREF = "/invite";
-// Tools and Data stations open the Explore feed filtered to that chip, which
-// leads with the hand-picked list (lib/curated.ts).
-const TOOLS_HREF = "/explore?category=tool";
-const DATASETS_HREF = "/explore?category=dataset";
-const LOCKED_GREY = "#9ca3af";
+const SDDS = "https://wiki.smartdrugdiscovery.org/sdds-2026";
+const isExternal = (href: string) => /^https?:\/\//.test(href);
+
+// Label gets a ↗ and the stop opens in a new tab when the link leaves the site.
+function st(label: string, x: number, y: number, side: Side, href: string): Station {
+  const external = isExternal(href);
+  return { label: [external ? `${label} ↗` : label], x, y, side, href, external };
+}
 
 const LINES: MapLine[] = [
   {
@@ -62,41 +56,22 @@ const LINES: MapLine[] = [
     color: "#2563eb",
     path: "M100 296 H300 L380 376 H820 L900 296 H1140",
     stations: [
-      { label: ["Key papers"], x: 100, y: 296, side: "above", href: "/explore" },
-      { label: ["Latest papers"], x: 260, y: 296, side: "above", href: "/explore" },
-      {
-        label: ["Our lab's papers"],
-        x: 960,
-        y: 296,
-        side: "above",
-        href: "/explore/AI%20drug%20discovery",
-      },
-      { label: ["Industry news"], x: 1140, y: 296, side: "above", href: "/explore" },
+      st("Ask AI", 100, 296, "above", "/explore"),
+      st("Latest papers", 260, 296, "above", "/explore?category=paper"),
+      st("Our lab's papers", 960, 296, "above", "/sparc#publications"),
+      st("News", 1140, 296, "above", "/explore?category=news"),
     ],
   },
   {
     id: "data",
-    name: "Data",
+    name: "Funding & trials",
     color: "#CA8A04",
     path: "M465 110 V180 L545 260 V540 L465 620 V690",
     stations: [
-      {
-        label: ["Gene expression"],
-        x: 465,
-        y: 110,
-        side: "left",
-        href: DATASETS_HREF,
-      },
-      { label: ["Target evidence"], x: 545, y: 300, side: "left", href: "/explore/PHGDH" },
-      {
-        label: ["Patient cohorts", "(OneFlorida+)"],
-        x: 545,
-        y: 500,
-        side: "left",
-        href: LOCKED_HREF,
-        locked: true,
-      },
-      { label: ["Virtual cell"], x: 465, y: 690, side: "left", href: LOCKED_HREF, locked: true },
+      st("Grants", 465, 110, "left", "/explore?category=grant"),
+      st("Clinical trials", 545, 300, "left", "/explore?category=trial"),
+      st("FDA approvals", 545, 500, "left", "/explore?category=approval"),
+      st("Preprints", 465, 690, "left", "/explore?category=preprint"),
     ],
   },
   {
@@ -105,47 +80,22 @@ const LINES: MapLine[] = [
     color: "#1A5632",
     path: "M735 110 V180 L655 260 V540 L735 620 V690",
     stations: [
-      { label: ["RDKit"], x: 735, y: 110, side: "right", href: TOOLS_HREF },
-      {
-        label: ["AutoDock Vina"],
-        x: 655,
-        y: 300,
-        side: "right",
-        href: TOOLS_HREF,
-      },
-      {
-        label: ["Single cell models"],
-        x: 655,
-        y: 500,
-        side: "right",
-        href: TOOLS_HREF,
-      },
-      { label: ["PAGER"], x: 735, y: 690, side: "right", href: TOOLS_HREF },
+      st("Tools & datasets", 735, 110, "right", "/explore?category=tool"),
+      st("PAGER", 655, 300, "right", "https://github.com/aimed-lab/PAGER-Web-APP"),
+      st("Talent Knowledge Map", 655, 500, "right", "http://cm4aikg.vercel.app/"),
+      st("CM4AI datasets", 735, 690, "right", "/sparc#datasets"),
     ],
   },
   {
     id: "projects",
-    name: "Projects",
+    name: "Events",
     color: "#9333ea",
     path: "M100 400 H1140",
     stations: [
-      {
-        label: ["ColaboFest 2026"],
-        x: 100,
-        y: 400,
-        side: "above",
-        href: "/communities/colabofest-2026",
-      },
-      { label: ["Collaborate board"], x: 260, y: 400, side: "above", href: "/collaborate" },
-      { label: ["Promote your work"], x: 960, y: 400, side: "above", href: "/promote" },
-      {
-        label: ["Sponsored challenges"],
-        x: 1140,
-        y: 400,
-        side: "above",
-        href: LOCKED_HREF,
-        locked: true,
-      },
+      st("ColaboFest 2026", 100, 400, "above", "/promote/conference-or-talk-zfnlb"),
+      st("SDDS 2026", 260, 400, "above", SDDS),
+      st("Promote your work", 960, 400, "above", "/promote"),
+      st("CFDE Fall 2026", 1140, 400, "above", "https://portal.cfdeconnect.org/meetings/fall-2026"),
     ],
   },
   {
@@ -154,56 +104,28 @@ const LINES: MapLine[] = [
     color: "#ec4899",
     path: "M100 504 H300 L380 424 H820 L900 504 H1140",
     stations: [
-      { label: ["Communities"], x: 100, y: 504, side: "below", href: "/communities" },
-      {
-        label: ["Talent graph"],
-        x: 260,
-        y: 504,
-        side: "below",
-        href: LOCKED_HREF,
-        locked: true,
-      },
-      {
-        label: ["Company directory"],
-        x: 960,
-        y: 504,
-        side: "below",
-        href: "/collaborate/providers",
-      },
-      { label: ["Experts"], x: 1140, y: 504, side: "below", href: LOCKED_HREF, locked: true },
+      st("Communities", 100, 504, "below", "/communities"),
+      st("Teams", 260, 504, "below", "https://project.smartdrugdiscovery.org"),
+      st("Join SPARC Investigators", 960, 504, "below", "/communities/sparc-investigators"),
+      st("OSDD-2", 1140, 504, "below", "https://www.smartdrugdiscovery.org/post/osdd2"),
     ],
   },
 ];
 
-const ROUTE_ID = "phgdh";
+const ROUTE_ID = "sparc-picks";
 const ROUTE_COLOR = "#C2410C";
 
-// Station positions along the route, by step key (lib/phgdhRoute.ts).
-const ROUTE_POS: Record<string, { x: number; y: number; side: Side }> = {
-  papers: { x: 120, y: 735, side: "below" },
-  alert: { x: 280, y: 735, side: "below" },
-  collection: { x: 440, y: 735, side: "below" },
-  analysis: { x: 800, y: 45, side: "above" },
-  patent: { x: 960, y: 45, side: "above" },
-  join: { x: 1120, y: 45, side: "above" },
-};
-
+// Starts at the hub and runs down to its three stops at the bottom left.
 const ROUTE: MapLine = {
   id: ROUTE_ID,
-  name: "PHGDH route",
+  name: "SPARC picks",
   color: ROUTE_COLOR,
-  path: "M120 735 H535 L600 670 V100 L655 45 H1120",
-  stations: PHGDH_STEPS.map((step, i) => {
-    const external = isExternal(step.href);
-    return {
-      label: [external ? `${step.station} ↗` : step.station],
-      ...ROUTE_POS[step.key],
-      href: step.href,
-      locked: step.locked,
-      external,
-      number: i + 1,
-    };
-  }),
+  path: "M600 445 V670 L535 735 H120",
+  stations: [
+    st("Podcast", 120, 735, "below", "/explore/podcast"),
+    st("SPARC tools", 280, 735, "below", "/sparc#tools"),
+    st("Patents", 440, 735, "below", "/sparc#patents"),
+  ],
 };
 
 const ALL_LINES: MapLine[] = [...LINES, ROUTE];
@@ -214,7 +136,6 @@ const VIEW_Y = 0;
 const VIEW_H = 785;
 const HUB_X = 600; // centre of the interchange pill
 const R = 12; // station radius
-const BADGE_R = 13; // numbered route stop / badge radius (about 22px across at 1440px)
 const LABEL_GAP = 24;
 
 function labelPlacement(s: Station) {
@@ -242,14 +163,11 @@ function StationNode({
   color,
   lineId,
   setHover,
-  hideLabel,
 }: {
   station: Station;
   color: string;
   lineId: string;
   setHover: (id: string | null) => void;
-  /** Hide the text label (the stop stays, and stays clickable). */
-  hideLabel?: boolean;
 }) {
   const [grow, setGrow] = useState(false);
   const p = labelPlacement(station);
@@ -258,7 +176,7 @@ function StationNode({
   return (
     <Wrapper
       href={station.href}
-      aria-label={station.locked ? `${name} (invite code required)` : name}
+      aria-label={name.replace(" ↗", "")}
       onMouseEnter={() => {
         setGrow(true);
         setHover(lineId);
@@ -275,7 +193,7 @@ function StationNode({
         setGrow(false);
         setHover(null);
       }}
-      className="outline-none"
+      className="outline-none cursor-pointer"
     >
       {/* Generous invisible hit area so the stop is easy to tap on a phone. */}
       <circle cx={station.x} cy={station.y} r={22} fill="transparent" />
@@ -286,77 +204,7 @@ function StationNode({
           transition: "transform 150ms ease",
         }}
       >
-        {station.number !== undefined && !station.locked ? (
-          // Numbered route stop: a filled disc (about 22px across at desktop
-          // width) holding a white number, with a white edge to lift it off the line.
-          <circle
-            cx={station.x}
-            cy={station.y}
-            r={BADGE_R}
-            fill={color}
-            stroke="#fff"
-            strokeWidth={2.5}
-          />
-        ) : (
-          <circle
-            cx={station.x}
-            cy={station.y}
-            r={R}
-            fill="#fff"
-            stroke={station.locked ? LOCKED_GREY : color}
-            strokeWidth={5}
-            strokeDasharray={station.locked ? "5 3.5" : undefined}
-          />
-        )}
-        {station.locked && (
-          <g
-            transform={`translate(${station.x - 5} ${station.y - 6})`}
-            fill="none"
-            stroke="#6b7280"
-            strokeWidth={1.6}
-          >
-            <path d="M2.2 5 V3.4 a2.8 2.8 0 0 1 5.6 0 V5" />
-            <rect x="0.8" y="5" width="8.4" height="6.2" rx="1.2" fill="#6b7280" />
-          </g>
-        )}
-        {station.number !== undefined &&
-          (station.locked ? (
-            // The lock fills the stop, so the same badge sits beside it.
-            <g style={{ pointerEvents: "none" }}>
-              <circle
-                cx={station.x + 20}
-                cy={station.y - 20}
-                r={BADGE_R}
-                fill={color}
-                stroke="#fff"
-                strokeWidth={2.5}
-              />
-              <text
-                x={station.x + 20}
-                y={station.y - 20 + 5.2}
-                textAnchor="middle"
-                fontSize={15}
-                fontWeight={700}
-                fill="#fff"
-                className="font-label-md"
-              >
-                {station.number}
-              </text>
-            </g>
-          ) : (
-            <text
-              x={station.x}
-              y={station.y + 5.2}
-              textAnchor="middle"
-              fontSize={15}
-              fontWeight={700}
-              fill="#fff"
-              className="font-label-md"
-              style={{ pointerEvents: "none" }}
-            >
-              {station.number}
-            </text>
-          ))}
+        <circle cx={station.x} cy={station.y} r={R} fill="#fff" stroke={color} strokeWidth={5} />
       </g>
       <text
         textAnchor={p.anchor}
@@ -364,9 +212,9 @@ function StationNode({
         y={p.y}
         className="font-label-md"
         fontSize={16}
-        fontWeight={station.locked ? 500 : 600}
-        fill={station.locked ? "#6b7280" : "#191c1e"}
-        style={{ pointerEvents: "none", display: hideLabel ? "none" : undefined }}
+        fontWeight={600}
+        fill={grow ? "#033319" : "#191c1e"}
+        style={{ pointerEvents: "none" }}
       >
         {station.label.map((l, i) => (
           <tspan key={l} x={p.x} dy={i === 0 ? 0 : 17} fontSize={i === 0 ? 16 : 14}>
@@ -380,11 +228,6 @@ function StationNode({
 
 export default function DiscoveryMap() {
   const [hover, setHover] = useState<string | null>(null);
-  // "full": every line at full strength, the PHGDH route on top (default).
-  // "case": only the PHGDH route at full strength; the others fade to 15% and
-  // lose their labels (hovering one brings it back).
-  const [mode, setMode] = useState<"full" | "case">("full");
-  const faded = (id: string) => mode === "case" && id !== ROUTE_ID && hover !== id;
   const boxRef = useRef<HTMLDivElement>(null);
 
   // When the box is narrower than the map (phones), open scrolled so the
@@ -405,10 +248,10 @@ export default function DiscoveryMap() {
         <svg
           viewBox={`${VIEW_X} ${VIEW_Y} ${VIEW_W} ${VIEW_H}`}
           role="group"
-          aria-label="Drug discovery map: five lines, Papers, Data, Tools, Projects and People, and the numbered PHGDH route, all meeting at SmartDrugDiscovery"
+          aria-label="Map of the hub: six lines, Papers, Funding and trials, Tools, Events, People and SPARC picks, all meeting at SmartDrugDiscovery"
           className="block w-full min-w-[1000px] h-auto md:max-h-[calc(100vh-165px)]"
         >
-          {/* Lines (the route last, so it sits on top where it matters) */}
+          {/* Lines (the SPARC picks line last, so it sits on top) */}
           {ALL_LINES.map((line) => {
             const isRoute = line.id === ROUTE_ID;
             const on = hover === line.id;
@@ -421,19 +264,14 @@ export default function DiscoveryMap() {
                 strokeWidth={(isRoute ? 13 : 10) + (on ? 4 : 0)}
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                opacity={faded(line.id) ? 0.15 : 1}
-                style={{ transition: "stroke-width 150ms ease, opacity 200ms ease" }}
+                style={{ transition: "stroke-width 150ms ease" }}
               />
             );
           })}
 
           {/* Stations and labels: faded lines keep readable (and clickable) stops */}
           {ALL_LINES.map((line) => (
-            <g
-              key={line.id}
-              opacity={faded(line.id) ? 0.15 : 1}
-              style={{ transition: "opacity 200ms ease" }}
-            >
+            <g key={line.id}>
               {line.stations.map((s) => (
                 <StationNode
                   key={s.label[0]}
@@ -441,7 +279,6 @@ export default function DiscoveryMap() {
                   color={line.color}
                   lineId={line.id}
                   setHover={setHover}
-                  hideLabel={faded(line.id)}
                 />
               ))}
             </g>
@@ -475,16 +312,6 @@ export default function DiscoveryMap() {
         </svg>
       </div>
 
-      <div className="mt-3 text-center">
-        <button
-          type="button"
-          onClick={() => setMode((m) => (m === "full" ? "case" : "full"))}
-          className="font-label-md text-label-md text-primary hover:underline underline-offset-4"
-        >
-          {mode === "full" ? "Highlight the PHGDH case" : "Show everything"} ⇄
-        </button>
-      </div>
-
       <p className="md:hidden mt-2 text-center font-label-sm text-label-sm text-secondary">
         <span className="material-symbols-outlined align-middle text-base mr-1">swipe</span>
         Swipe to explore the map
@@ -505,14 +332,6 @@ export default function DiscoveryMap() {
             {line.name}
           </li>
         ))}
-        <li className="flex items-center gap-2 font-label-md text-label-md text-secondary">
-          <span
-            aria-hidden
-            className="inline-block h-4 w-4 rounded-full border-[3px] border-dashed"
-            style={{ borderColor: LOCKED_GREY }}
-          />
-          Invite code
-        </li>
       </ul>
     </div>
   );
