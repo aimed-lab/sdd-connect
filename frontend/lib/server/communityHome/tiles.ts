@@ -6,7 +6,7 @@
 
 // ── sections (?view=) ────────────────────────────────────────────────────────
 
-export const COMMUNITY_VIEWS = ["announcements", "events", "members", "resources", "pages", "showcase", "manage"] as const;
+export const COMMUNITY_VIEWS = ["projects", "announcements", "events", "members", "resources", "pages", "showcase", "manage"] as const;
 export type CommunityView = (typeof COMMUNITY_VIEWS)[number];
 
 /** The section the URL asks for: ?view= first, else the old ?tab= mapped to its view
