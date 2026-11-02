@@ -50,6 +50,7 @@ export const sparcTools: SparcTool[] = [
     oneLine:
       "Electronic repository integrating pathways, annotated gene lists, and gene signatures with network-level enrichment analysis for functional genomics.",
     links: [
+      { label: "Launch", href: "https://aimed-lab.shinyapps.io/PAGERwebapp/" },
       { label: "GitHub", href: "https://github.com/aimed-lab/PAGER-Web-APP" },
       { label: "Paper", href: "https://doi.org/10.3389/fgene.2022.820361" },
       { label: "Paper", href: "https://doi.org/10.1093/nar/gkx1013" },
@@ -111,7 +112,7 @@ export const sparcTools: SparcTool[] = [
     oneLine:
       "Interactive knowledge graph for exploring interdisciplinary research teams, expertise, and collaboration networks across NIH Bridge2AI and CFDE communities.",
     links: [
-      { label: "Launch", href: "http://cm4aikg.vercel.app/" },
+      { label: "Launch", href: "https://bridge2ai.labs-app.com/" },
       { label: "Paper", href: "https://doi.org/10.1145/3543873.3587579" },
     ],
   },

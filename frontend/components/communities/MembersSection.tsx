@@ -1,6 +1,7 @@
 import type { CommunityRole, MemberRosterEntry } from "@/lib/server/communities";
 import Link from "next/link";
 import { closestFirst, type SimilarMember } from "@/lib/server/communityHome/similarMembers";
+import { initials } from "@/lib/server/communityHome/communityHome";
 import ConnectButton from "./ConnectButton";
 import FocusField from "./FocusField";
 import HiddenToggle from "./HiddenToggle";
@@ -70,7 +71,10 @@ function MemberCard({
   isMember,
   editFocusOnLoad,
   reason,
+  plain = false,
 }: {
+  /** Name, avatar and affiliation only (no role, focus, Connect or hide controls). */
+  plain?: boolean;
   member: MemberRosterEntry;
   editFocusOnLoad: boolean;
   /** "Both: KRAS, pancreatic cancer", shown in the Closest-to-you order. */
@@ -90,6 +94,22 @@ function MemberCard({
   // stays true even if this component is ever reused somewhere that
   // invariant doesn't hold.
   const isSelf = isMember && member.user_id === viewerUserId;
+  if (plain) {
+    return (
+      <div className="rounded-xl bg-surface-container-low p-4 flex items-center gap-3 min-w-0">
+        <span
+          className="grid place-items-center shrink-0 w-10 h-10 rounded-full bg-white text-primary border border-[#e2dfd6] font-label-sm text-[12px] font-semibold"
+          aria-hidden
+        >
+          {initials(member.display_name)}
+        </span>
+        <div className="min-w-0">
+          <p className="font-label-md text-label-md text-on-background truncate">{member.display_name}</p>
+          {member.institution && <p className="font-body-sm text-body-sm text-secondary truncate">{member.institution}</p>}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="rounded-xl bg-surface-container-low p-4">
       <p className="font-label-md text-label-md text-on-background truncate">
@@ -159,7 +179,13 @@ export default function MembersSection({
   similar = null,
   order = "role",
   orderHrefs,
+  plain = false,
+  notSignedIn = 0,
 }: {
+  /** Plain mode: how many members have no name yet; one gray line counts them. */
+  notSignedIn?: number;
+  /** Name, avatar and affiliation only, in one flat list (the invite-only ColaboFest community). */
+  plain?: boolean;
   /** Open the viewer's own focus editor on load (?editFocus=1). */
   editFocusOnLoad?: boolean;
   /** The viewer's similarity to each member (only for a member with a focus),
@@ -188,8 +214,34 @@ export default function MembersSection({
     );
   }
 
-  if (roster.length === 0) {
+  if (roster.length === 0 && !(plain && notSignedIn > 0)) {
     return <p className="font-body-md text-body-md text-secondary">No other members yet. Share this community&apos;s link to invite people.</p>;
+  }
+
+  if (plain) {
+    return (
+      <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {roster.map((m) => (
+          <MemberCard
+            key={m.member_id}
+            member={m}
+            communityId={communityId}
+            slug={slug}
+            viewerUserId={viewerUserId}
+            isMember={isMember}
+            editFocusOnLoad={false}
+            plain
+          />
+        ))}
+      </div>
+      {notSignedIn > 0 && (
+        <p className="font-body-sm text-body-sm text-secondary">
+          + {notSignedIn} team {notSignedIn === 1 ? "member" : "members"} who {notSignedIn === 1 ? "has" : "have"} not signed in yet
+        </p>
+      )}
+      </div>
+    );
   }
 
   const closest = !!similar && order === "closest";

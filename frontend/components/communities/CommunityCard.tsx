@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Community, CommunityRole } from "@/lib/server/communities";
 import { joinModeLabel } from "@/lib/server/communityHome/communityHome";
+import { communityDescription, isColabofestCommunity } from "@/lib/server/communityHome/colabofest";
 
 /** Admin/Member/Pending, or nothing at all when the viewer has no
  *  relationship to this community yet — "nothing" is a real, intentional
@@ -52,7 +53,8 @@ export default function CommunityCard({
   memberCount: number;
 }) {
   const badge = membershipBadge(member, role, pending);
-  const mode = joinModeLabel(community.is_open);
+  const inviteOnly = isColabofestCommunity(community.slug);
+  const mode = inviteOnly ? "Invite only" : joinModeLabel(community.is_open);
 
   return (
     <Link
@@ -71,7 +73,7 @@ export default function CommunityCard({
 
       <div className="p-5 flex flex-col gap-3 flex-1">
         <p className="font-body-sm text-body-sm text-secondary line-clamp-1 min-h-[1.25rem]">
-          {community.description ?? ""}
+          {communityDescription(community.slug, community.description) ?? ""}
         </p>
 
         <div className="mt-auto flex items-center justify-between gap-3">
@@ -82,14 +84,14 @@ export default function CommunityCard({
           <span
             className={
               "px-2.5 py-1 rounded-full font-label-sm text-label-sm " +
-              (member || community.is_open
+              (member || (community.is_open && !inviteOnly)
                 ? "bg-surface-container-low text-primary"
                 : "border border-outline-variant/50 text-secondary")
             }
           >
             {/* A member has already joined: "Request to join" / "Open to join"
                 would be wrong, so the card just says Open. */}
-            {member ? "Open" : mode}
+            {member && !inviteOnly ? "Open" : mode}
           </span>
         </div>
       </div>

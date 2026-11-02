@@ -5,9 +5,9 @@
 // Green border. Pinned opens the pinned link itself. Server-safe.
 
 import Link from "next/link";
-import { IconBook, IconCalendar, IconFileCheck, IconMegaphone, IconSettings, IconUsers } from "./CommunityIcons";
+import { IconBook, IconCalendar, IconFileCheck, IconFolder, IconMegaphone, IconSettings, IconUsers } from "./CommunityIcons";
 
-export type TileKey = "announcements" | "events" | "members" | "resources" | "pinned" | "manage";
+export type TileKey = "projects" | "announcements" | "events" | "members" | "resources" | "pinned" | "manage";
 
 export type TileSpec = {
   key: TileKey;
@@ -23,6 +23,7 @@ export type TileSpec = {
 };
 
 const ICON = {
+  projects: IconFolder,
   announcements: IconMegaphone,
   events: IconCalendar,
   members: IconUsers,

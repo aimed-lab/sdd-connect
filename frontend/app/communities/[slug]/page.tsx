@@ -37,6 +37,8 @@ import {
   listMyLivingPageTexts,
   listMemberRoster,
   listPendingRequests,
+  type Membership,
+  type MemberRosterEntry,
 } from "@/lib/server/communities";
 import { listCommunityEvents } from "@/lib/server/communityEvents";
 import { listShowcaseByCommunity } from "@/lib/server/showcase";
@@ -62,6 +64,15 @@ import {
   type CommunityView,
 } from "@/lib/server/communityHome/tiles";
 import { getCurrentUser } from "@/lib/auth";
+import {
+  buildProjectRows,
+  communityDescription,
+  isColabofestCommunity,
+  personKey,
+  splitNamed,
+} from "@/lib/server/communityHome/colabofest";
+import { getColabofestViewer, listColabofestPeople, listColabofestProjects } from "@/lib/server/colabofestCommunity";
+import ColabofestProjectsView from "@/components/communities/ColabofestProjectsView";
 import AddMemberByEmailForm from "@/components/communities/AddMemberByEmailForm";
 import PendingRequestsPanel from "@/components/communities/PendingRequestsPanel";
 import MemberRoster from "@/components/communities/MemberRoster";
@@ -124,23 +135,33 @@ export default async function CommunityDetailPage({
   // still-unlinked membership state.
   await claimPendingCommunityMemberships();
 
-  const [user, membership, stats] = await Promise.all([
+  // ColaboFest 2026 is invite only, and its members are the community_members rows
+  // PLUS everyone on one of its projects (a project_members row). Nobody joins it.
+  const isColab = isColabofestCommunity(slug);
+  const [user, communityMembership, stats, colabViewer] = await Promise.all([
     getCurrentUser(),
     getMembership(community.id),
     getCommunityStats(community.id),
+    isColab ? getColabofestViewer() : Promise.resolve({ projectIds: [] as string[], isManager: false }),
   ]);
+  const onColabProject = isColab && colabViewer.projectIds.length > 0;
+  const membership: Membership =
+    onColabProject && communityMembership.state !== "active"
+      ? { state: "active", role: "member", isAdmin: false }
+      : communityMembership;
 
   const now = new Date();
   const orderedSections = resolveSections(community.sections);
   const isMember = membership.state === "active";
   const viewer = { isMember, publicPreview: community.public_preview };
-  const access = viewerAccess(viewer);
+  const access = { ...viewerAccess(viewer), ...(isColab ? { joinPrompt: false } : {}) };
   const sectionOn = (key: string) => orderedSections.some((s) => s.key === key && s.enabled);
 
   // Which sections this viewer can open. A member picks one with ?view= (or the old
   // ?tab=); a non-member keeps the tab bar.
   const available: CommunityView[] = [];
   if (isMember) {
+    if (isColab) available.push("projects");
     if (sectionOn("announcements")) available.push("announcements");
     if (sectionOn("events")) available.push("events");
     if (access.seesMembers && sectionOn("members")) available.push("members");
@@ -171,8 +192,28 @@ export default async function CommunityDetailPage({
   // The roster, when this viewer may see it. Its length (not the public stat)
   // is the member count whenever the roster is visible, so the header matches
   // what the Members view lists (hidden staff rows are not in it).
-  const memberRoster = access.seesMembers ? await listMemberRoster(community.id) : [];
-  const memberCount = access.seesMembers ? memberRoster.length : stats.memberCount;
+  // ColaboFest: only people with a real name are listed (no email ever reaches the page);
+  // the rest are counted in "+ N team members who have not signed in yet".
+  const colabAll = isColab ? await listColabofestPeople(community.id, user?.id ?? null) : [];
+  const { named: colabPeople, unnamedCount: colabUnnamed } = splitNamed(colabAll);
+  let memberRoster: MemberRosterEntry[];
+  if (isColab && isMember) {
+    memberRoster = colabPeople
+      .map((p) => ({
+        member_id: `colab-${personKey(p)}`,
+        user_id: p.user_id,
+        role: p.role,
+        display_name: p.name ?? "Member",
+        institution: p.institution,
+        focus: null,
+        signed_up: true,
+        hidden: false,
+      }))
+      .sort((a, b) => (a.role === b.role ? a.display_name.localeCompare(b.display_name) : a.role === "admin" ? -1 : 1));
+  } else {
+    memberRoster = access.seesMembers ? await listMemberRoster(community.id) : [];
+  }
+  const memberCount = isColab ? colabAll.length : access.seesMembers ? memberRoster.length : stats.memberCount;
   const authorNames: Record<string, string> = Object.fromEntries(
     memberRoster.filter((m) => m.user_id).map((m) => [m.user_id as string, m.display_name])
   );
@@ -249,12 +290,25 @@ export default async function CommunityDetailPage({
   // ?join=1) in the header instead of this notice.
   const emailJoinOffered = membership.state === "signed_out" && community.is_open;
   const showJoinNotice =
-    query.join === "1" && !isMember && membership.state !== "pending" && !emailJoinOffered;
+    !isColab && query.join === "1" && !isMember && membership.state !== "pending" && !emailJoinOffered;
 
   // ── the member's tiles and home ─────────────────────────────────────────────
   const pinnedHref = pinned ? (pinned.files[0]?.url ?? pinned.url) : null;
+  // ColaboFest: every project title, for members only (a non-member never triggers this read).
+  const colabProjects = isColab && isMember && available.includes("projects") ? await listColabofestProjects() : null;
+  const openAllProjects = membership.isAdmin || colabViewer.isManager;
+  const colabRows = colabProjects ? buildProjectRows(colabProjects, { myProjectIds: colabViewer.projectIds, openAll: openAllProjects }) : [];
+
   const tiles: TileSpec[] = [];
   if (isMember) {
+    if (isColab && colabProjects) {
+      tiles.push({
+        key: "projects",
+        label: "Projects",
+        small: plural(colabProjects.length, "project"),
+        href: hrefFor("projects"),
+      });
+    }
     if (available.includes("announcements")) {
       const fresh = newCount(announcements, now);
       tiles.push({
@@ -337,13 +391,14 @@ export default async function CommunityDetailPage({
 
       <div className="flex flex-col gap-6">
         <CommunityHeader
-          community={community}
+          community={{ ...community, description: communityDescription(community.slug, community.description) }}
           membership={membership}
           memberNames={memberRoster.map((m) => m.display_name)}
           memberCount={memberCount}
           pageCount={access.seesMembers ? livingPages.length : null}
           updatedAt={updatedAt}
           autoOpenJoin={query.join === "1"}
+          inviteOnly={isColab}
         />
 
         {showJoinNotice && (
@@ -364,7 +419,7 @@ export default async function CommunityDetailPage({
           <>
             {!view && <CommunityTiles slug={slug} view={view} tiles={tiles} />}
 
-            {view && (
+            {view && view !== "projects" && (
               <div>
                 <Link
                   href={base}
@@ -389,7 +444,7 @@ export default async function CommunityDetailPage({
                   showMembers={available.includes("members")}
                   membersLabel={memberTileLabel(slug)}
                 />
-                {sectionOn("projects") && (
+                {sectionOn("projects") && !isColab && (
                   <CollapsibleSection
                     title={SECTION_LABEL.projects}
                     defaultOpen
@@ -424,6 +479,8 @@ export default async function CommunityDetailPage({
                 )}
               </>
             )}
+
+            {view === "projects" && isColab && <ColabofestProjectsView base={base} rows={colabRows} />}
 
             {view === "announcements" && (
               <AnnouncementsSection
@@ -460,6 +517,8 @@ export default async function CommunityDetailPage({
                   <MembersSection
                     canView={access.seesMembers}
                     isMember={isMember}
+                    plain={isColab}
+                    notSignedIn={isColab ? colabUnnamed : 0}
                     roster={memberRoster}
                     communityId={community.id}
                     slug={slug}
