@@ -35,7 +35,11 @@ export default async function CommunitiesPage({
   const siteAdmin = user ? await isSiteAdmin() : false;
 
   const yours = communities.filter((c) => memberships[c.id]?.status === "active");
-  const others = communities.filter((c) => memberships[c.id]?.status !== "active");
+  // Signed-out visitors only see communities with at least 3 members (the count the
+  // cards show); signed-in users see all of them.
+  const others = communities.filter(
+    (c) => memberships[c.id]?.status !== "active" && (user || (c.member_count ?? 0) >= 3)
+  );
 
   return (
     <PageShell className="flex flex-col gap-12">
@@ -87,7 +91,7 @@ export default async function CommunitiesPage({
       )}
 
       <section className="flex flex-col gap-6">
-        <SectionHeading title="Other communities" className="" />
+        <SectionHeading title={user ? "Other communities" : "Communities"} className="" />
         {others.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-gutter">
             {others.map((c) => (
@@ -102,7 +106,7 @@ export default async function CommunitiesPage({
           </div>
         ) : (
           <p className="font-body-sm text-body-sm text-secondary">
-            {communities.length === 0
+            {communities.length === 0 || !user
               ? siteAdmin
                 ? "No communities yet. Start the first one with the button above."
                 : "No communities yet."
