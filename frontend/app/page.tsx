@@ -1,188 +1,109 @@
-// Landing page ("/") — the BioTechX Europe pitch: open source drug discovery,
-// an open network where researchers build projects. The hero presents the hub
-// and its three functions (Explore, Collaborate, Promote, same words as the nav). "Explore the hub" is the
-// clickable DiscoveryMap: five lines, every stop a real page. Uses the shared design
-// tokens (tailwind.config.ts) and the .btn-primary class from globals.css. Nav
-// + Footer come from the root layout.
+// Landing page ("/"): a simple, phone-first home. A compact green header with the
+// Explore question box, a grid of eight tiles (each one link), and an "Advanced"
+// button that opens, in place, the flywheel, the "three scales" band and the hub
+// map (?advanced=1 starts it open). Nav + Footer come from the root layout.
 //
-// No reveal-on-scroll animation, and no backdrop-filter on cards (glass cards
-// rendered blank on phones until scrolled past): everything is visible on first
-// paint. The news row uses the same tinted tiles as Explore (NewsTile).
+// Hidden from the home page (components kept, just not rendered here): the hero,
+// the "Explore on your own" news/podcast strip, the closing call-to-action bars and
+// the locked-network preview (LockedNetworkCard).
 //
-// SERVER component. Two live reads, both degrade to "not shown" on failure:
-//   * 3 Industry News headlines (non-political, most relevant then newest), from the explore-mcp landing feed
-//     (the same RSS-backed news section Explore's News chip shows);
-//   * the podcast episode count, from the same wiki_pages read /explore/podcast
-//     uses.
-// HONESTY RULE: a number is only rendered when it came from one of those reads
-// AND is at least MIN_COUNT_TO_SHOW. Nothing here is a typed-in statistic.
+// SERVER component; no data reads.
 
 import Link from "next/link";
 import FlywheelSection from "@/components/FlywheelSection";
 import DiscoveryMap from "@/components/DiscoveryMap";
-import NewsTile from "@/components/explore/NewsTile";
-import { rankNews } from "@/lib/newsLead";
-import LockedNetworkCard from "@/components/LockedNetworkCard";
-import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
-import { TYPE_STYLES } from "@/lib/typeStyles";
-import { listEpisodes } from "@/lib/server/wiki";
-import type { ExploreItem, ExploreResponse } from "@/types/explore";
+import HomeAdvanced from "@/components/home/HomeAdvanced";
+import HomeQuestionBox from "@/components/home/HomeQuestionBox";
 
-const MIN_COUNT_TO_SHOW = 10;
-
-async function getLatestNews(): Promise<ExploreItem[]> {
-  try {
-    const res = await fetch(`${EXPLORE_API_URL}/api/explore`, {
-      method: "POST",
-      headers: exploreBackendHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ input: "" }),
-      next: { revalidate: 1800 },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) return [];
-    const data = (await res.json()) as ExploreResponse;
-    const news = (data.sections ?? []).find((s) => s.kind === "news");
-    // Not just the newest three: drop political headlines and rank the rest by
-    // drug-discovery relevance, then recency (lib/newsLead.ts).
-    return rankNews(news?.items ?? [], 3);
-  } catch (e) {
-    console.error("Home: news fetch failed", e);
-    return [];
-  }
-}
-
-async function getEpisodeCount(): Promise<number | null> {
-  try {
-    const result = await listEpisodes();
-    return result.status === "ok" ? result.episodes.length : null;
-  } catch {
-    return null;
-  }
-}
-
-const DARK = "bg-gradient-to-br from-on-primary-fixed to-on-primary-fixed-variant text-white";
 const WRAP = "max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop";
 
-export default async function Home() {
-  const [news, episodes] = await Promise.all([getLatestNews(), getEpisodeCount()]);
-  const showEpisodes = episodes !== null && episodes >= MIN_COUNT_TO_SHOW;
+const TILES: { label: string; hint: string; href: string; icon: string }[] = [
+  { label: "Papers", hint: "Newest research", href: "/explore?category=paper", icon: "article" },
+  { label: "Grants", hint: "Open, by deadline", href: "/explore?category=grant", icon: "payments" },
+  { label: "Clinical trials", hint: "Recruiting now", href: "/explore?category=trial", icon: "science" },
+  { label: "Tools & data", hint: "Free and open", href: "/explore?category=tool", icon: "build" },
+  { label: "Podcast", hint: "Drug Discovery AI Talk", href: "/explore/podcast", icon: "podcasts" },
+  { label: "Events", hint: "Conferences, contests", href: "/events", icon: "event" },
+  { label: "Communities", hint: "Researchers like you", href: "/communities", icon: "groups" },
+  { label: "SPARC", hint: "Papers, tools, patents", href: "/sparc", icon: "hub" },
+];
+
+const JOIN_FORM =
+  "https://docs.google.com/forms/d/e/1FAIpQLSdatp8U8wFMeubaaD9GPr-1jWun9r4qAnVB4SjBSurXvvIjXw/viewform";
+
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = await searchParams;
+  const adv = Array.isArray(sp.advanced) ? sp.advanced[0] : sp.advanced;
 
   return (
-    <>
-      {/* a. Hero: the hub and its three functions */}
-      <section className="bg-[var(--explore-bg)]">
-        <div className={`${WRAP} pt-12 md:pt-16 pb-10 md:pb-12`}>
-          <div className="max-w-4xl mx-auto text-center space-y-4">
-            <h1 className="font-title text-[40px] md:text-[56px] leading-[1.1] font-medium text-on-background">
-              Explore. Build. Promote.{" "}
-              <br className="hidden sm:block" />
-              Open drug discovery in one hub.
-            </h1>
-            <p className="font-body-lg text-body-lg text-secondary">
-              Papers, grants, tools and people in one place, plus the SPARC Center&apos;s own
-              publications, tools and podcast.
-            </p>
-            <div className="flex flex-col sm:flex-row justify-center gap-3 pt-2">
+    <div className="bg-[var(--explore-bg)]">
+      {/* 1. Compact header with the question box */}
+      <section className="bg-[#1A5632] text-white">
+        <div className={`${WRAP} py-8 md:py-10`}>
+          <div className="max-w-3xl mx-auto">
+            <h1 className="font-title text-[28px] md:text-[34px] leading-tight font-medium">Drug discovery resources, in one place</h1>
+            <p className="mt-1 mb-5 font-body-md text-body-md text-white/85">Free and open, from UAB&apos;s Systems Pharmacology AI Research Center (SPARC).</p>
+            <HomeQuestionBox />
+          </div>
+        </div>
+      </section>
+
+      {/* 2. Eight tiles, each one link */}
+      <section className={`${WRAP} py-8 md:py-10`}>
+        <ul className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 max-w-4xl mx-auto">
+          {TILES.map((t) => (
+            <li key={t.label} className="min-w-0">
               <Link
-                href="/explore"
-                className="btn-primary px-8 py-3 rounded-lg font-label-md text-lg text-center"
+                href={t.href}
+                className="flex h-full min-h-[140px] flex-col items-center justify-center gap-2 rounded-[12px] border border-[#e2dfd6] bg-white p-4 text-center hover:border-[#1A5632] transition-colors"
               >
-                Start exploring →
+                <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#f3f1ea] text-[#1A5632]">
+                  <span className="material-symbols-outlined text-[24px]" aria-hidden>
+                    {t.icon}
+                  </span>
+                </span>
+                <span className="font-label-md text-[15px] leading-5 text-on-background break-words">{t.label}</span>
+                <span className="text-[12px] leading-4 text-[#6b6b6b] break-words">{t.hint}</span>
               </Link>
-            </div>
-          </div>
-        </div>
+            </li>
+          ))}
+        </ul>
       </section>
 
-      <FlywheelSection />
-
-      {/* a2. Explore the hub: the map */}
-      <section id="hub-map" className="bg-[var(--explore-bg)] scroll-mt-16">
-        <div className={`${WRAP} pb-12 md:pb-16`}>
-          <div className="max-w-3xl mx-auto text-center mb-4">
-            <h2 className="font-title text-[28px] md:text-[30px] leading-tight font-medium text-on-background">
-              Explore the hub
-            </h2>
-            <p className="mt-2 font-body-md text-body-md text-secondary">
-              Every stop opens a real page. Start anywhere.
-            </p>
-          </div>
-          <DiscoveryMap />
-        </div>
-      </section>
-
-      {/* b. Explore on your own */}
-      <section className="bg-[var(--explore-bg)]">
-        <div className={`${WRAP} py-14 md:py-16 border-t border-[#e7e4dc]`}>
-          <div className="flex items-end justify-between gap-3 mb-6">
-            <h2 className="font-title text-[28px] leading-tight font-medium text-on-background">
-              Explore on your own
-            </h2>
-            <Link
-              href="/explore"
-              className="font-label-md text-label-md text-primary hover:underline underline-offset-4 shrink-0 pb-1"
-            >
-              Open Explore →
-            </Link>
-          </div>
-          {(news.length > 0 || showEpisodes) && (
-            <div className="grid grid-cols-1 lg:grid-cols-4 gap-gutter items-stretch">
-              {news.map((item) => (
-                <NewsTile key={item.id} item={item} />
-              ))}
-              {showEpisodes && (
-                <Link
-                  href="/explore/podcast"
-                  className="tile flex flex-col justify-center gap-1 p-6"
-                  style={{ background: TYPE_STYLES.podcast.bg }}
-                >
-                  <p className="type-label" style={{ color: TYPE_STYLES.podcast.fg }}>
-                    Podcast
-                  </p>
-                  <p className="mt-2 font-title text-[44px] leading-none font-medium text-on-background">
-                    {episodes}
-                  </p>
-                  <p className="font-body-md text-body-md text-on-background/70">episodes</p>
-                </Link>
-              )}
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* c. One call to action */}
-      <section>
-        <div className={`${WRAP} py-14 md:py-16 flex justify-center`}>
-          <Link
-            href="/explore"
-            className="btn-primary px-8 py-4 rounded-lg font-label-md text-lg text-center"
-          >
-            Start exploring →
-          </Link>
-        </div>
-      </section>
-
-      {/* d. Locked network preview: placeholder bars only, no names */}
-      <section className={`${WRAP} py-14 md:py-16`}>
-        <LockedNetworkCard />
-      </section>
-
-      {/* e. Closing band */}
-      <section className={DARK}>
-        <div
-          className={`${WRAP} py-16 md:py-20 flex flex-col md:flex-row md:items-center md:justify-between gap-8`}
+      {/* Join line */}
+      <section className={`${WRAP} pb-8 md:pb-10`}>
+        <a
+          href={JOIN_FORM}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mx-auto flex max-w-4xl items-center justify-between gap-3 rounded-[10px] bg-[#f3f1ea] px-[14px] py-3 text-[15px] leading-6 text-on-background"
         >
-          <h2 className="font-headline-lg text-headline-lg md:text-[40px] md:leading-tight">
-            Have a target in mind? Start exploring.
-          </h2>
-          <Link
-            href="/explore"
-            className="btn-primary px-8 py-4 rounded-lg font-label-md text-lg text-center md:shrink-0"
-          >
-            Start exploring →
-          </Link>
-        </div>
+          <span>UAB faculty? Join SPARC</span>
+          <span className="shrink-0 font-medium text-[#1A5632] hover:text-[#033319]">Apply →</span>
+        </a>
       </section>
-    </>
+
+      {/* 3. Advanced: flywheel, three scales, hub map */}
+      <section className="pb-12 md:pb-16">
+        <HomeAdvanced defaultOpen={adv === "1"}>
+          <FlywheelSection />
+          <div id="hub-map" className="scroll-mt-16">
+            <div className={`${WRAP} pb-4`}>
+              <div className="max-w-3xl mx-auto text-center mb-4">
+                <h2 className="font-title text-[28px] md:text-[30px] leading-tight font-medium text-on-background">
+                  Explore the hub
+                </h2>
+                <p className="mt-2 font-body-md text-body-md text-secondary">Every stop opens a real page. Start anywhere.</p>
+              </div>
+              <DiscoveryMap />
+            </div>
+          </div>
+        </HomeAdvanced>
+      </section>
+    </div>
   );
 }
