@@ -160,6 +160,12 @@ def test_crossref_item_shape_and_type_guard():
         },
         {"title": ["A Whole Book"], "type": "book", "DOI": "10.9/b"},   # non-article -> dropped
         {"title": [""], "type": "journal-article"},                     # blank title -> dropped
+        # Supplementary files, reviews, datasets, theses, and a row with no type: dropped.
+        {"title": ["PHGDH in cancer metabolism"], "type": "component", "DOI": "10.5/xyz.s001"},
+        {"title": ["Review of: PHGDH in cancer metabolism"], "type": "peer-review", "DOI": "10.5/r1"},
+        {"title": ["PHGDH inhibitor screen data"], "type": "dataset", "DOI": "10.5/d1"},
+        {"title": ["PHGDH inhibitors in cancer"], "type": "dissertation", "DOI": "10.5/t1"},
+        {"title": ["PHGDH inhibitors, untyped"], "DOI": "10.5/u1"},
     ]}}})
     items = asyncio.run(fetch_crossref(client, "PHGDH", 10))
 
@@ -174,6 +180,16 @@ def test_crossref_item_shape_and_type_guard():
     assert it.signal is None                        # Crossref has no metric
     assert it.doi == "10.5/xyz"
     assert it.dedupe_key == "doi:10.5/xyz"
+
+
+def test_crossref_keeps_conference_papers_and_preprints():
+    client = _FakeClient({"api.crossref.org": {"message": {"items": [
+        {"title": ["PHGDH inhibitors in cancer: a conference paper"], "type": "proceedings-article", "DOI": "10.5/p1"},
+        {"title": ["PHGDH inhibitors in cancer: a preprint"], "type": "posted-content", "DOI": "10.5/pp1"},
+    ]}}})
+    items = asyncio.run(fetch_crossref(client, "PHGDH", 10))
+    assert sorted(i.doi for i in items) == ["10.5/p1", "10.5/pp1"]
+    assert all(i.kind == "paper" for i in items)   # Crossref preprints land in Papers
 
 
 if __name__ == "__main__":

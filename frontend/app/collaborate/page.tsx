@@ -122,7 +122,7 @@ export default async function CollaboratePage({
 
   const [posts, resources, user] = await Promise.all([
     listCollabPosts({ q, area, filter }),
-    listResources({}),
+    listResources({ q }),
     getCurrentUser(),
   ]);
   const signedIn = user !== null;
@@ -234,7 +234,7 @@ export default async function CollaboratePage({
             type="search"
             name="q"
             defaultValue={q}
-            placeholder="Search posts, resources and people…"
+            placeholder="Search posts and resources…"
             aria-label="Search the collaboration board"
             className="w-full h-14 bg-white border border-outline-variant/40 rounded-[14px] pl-12 pr-4 font-body-md text-body-md text-on-background placeholder:text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all"
           />
@@ -294,9 +294,11 @@ export default async function CollaboratePage({
       {/* Board */}
       {posts.length === 0 ? (
         <p className="mt-6 font-body-md text-body-md text-secondary">
-          {filtered
-            ? "Nothing matches that yet. Try a broader filter, or post what you are looking for."
-            : "No posts yet. Post what you need or offer and others can reply."}{" "}
+          {q && resources.length > 0
+            ? "No posts match that. The matching resources are listed below."
+            : filtered
+              ? "Nothing matches that yet. Try a broader filter, or post what you are looking for."
+              : "No posts yet. Post what you need or offer and others can reply."}{" "}
           <Link href={newPostHref} className="text-primary hover:underline underline-offset-4">
             Create a post
           </Link>
@@ -331,7 +333,9 @@ export default async function CollaboratePage({
           </Link>
         </div>
 
-        {resources.length === 0 ? (
+        {resources.length === 0 && q ? (
+          <p className="mt-6 font-body-md text-body-md text-secondary">No resources match that search.</p>
+        ) : resources.length === 0 ? (
           <div className="mt-6 max-w-xl">
             <InvitationCard
               heading="Nothing registered yet"

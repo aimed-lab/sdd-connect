@@ -268,7 +268,30 @@ test("synonyms combine with other words, and plain search is unchanged", () => {
   const p = doc("Acme", "DMPK and in vivo studies");
   assert.ok(matchesQuery(p, "adme in vivo"));
   assert.ok(!matchesQuery(p, "adme docking"));
-  assert.ok(matchesQuery(doc("Acme", "biosynthesis"), "synthesis"));
+  // A word with no synonym row still matches inside a longer word.
+  assert.ok(matchesQuery(doc("Acme", "polypeptide"), "peptide"));
+});
+
+test("search also matches the category label", () => {
+  const p = { name: "Acme", services: ["Route scouting"], description: "Scale-up.", category: "CRO - Chemistry" };
+  assert.ok(matchesQuery(p, "chemistry"));
+  assert.ok(matchesQuery(p, "chemistry cro"));
+  assert.ok(!matchesQuery(p, "manufacturing"));
+  assert.ok(!matchesQuery({ ...p, category: undefined }, "chemistry"));
+  const hit = (q: string) => filterProviders(all, q, null);
+  assert.ok(all.filter((x) => x.category === "CRO - Chemistry").every((x) => hit("chemistry").includes(x)));
+  assert.ok(all.filter((x) => x.category === "CDMO/Manufacturing").every((x) => hit("manufacturing").includes(x)));
+});
+
+test("the words researchers type, and the placeholder's examples, find providers", () => {
+  const hit = (q: string) => filterProviders(all, q, null).map((p) => p.slug);
+  for (const q of ["synthesis", "docking", "protein expression"]) {
+    assert.ok(hit(q).length > 0, q);
+  }
+  assert.deepEqual(hit("synthesis").sort(), hit("medicinal chemistry").sort());
+  assert.deepEqual(hit("docking").sort(), hit("virtual screening").sort());
+  // No provider does antibodies yet, so both may be empty; they must agree.
+  assert.deepEqual(hit("antibodies").sort(), hit("antibody").sort());
 });
 
 test("synonyms work on the real list", () => {

@@ -241,3 +241,55 @@ if __name__ == "__main__":
             print(f"FAIL  {fn.__name__}: {exc}")
     print(f"\n{len(fns) - failures}/{len(fns)} passed")
     sys.exit(1 if failures else 0)
+
+
+def test_future_dated_rows_sort_as_today():
+    """_order_and_cap: a date later than now (an upcoming issue's cover date)
+    sorts as if it were now. It stays among the newest rows, but a 2027 date
+    no longer outranks a nearer one, and rows that tie keep their order."""
+    now = "2026-11-10T12:00:00.000Z"
+    future_far = _item("crossref", "far", date="2027-05-01T00:00:00.000Z")
+    future_near = _item("crossref", "near", date="2026-12-01T00:00:00.000Z")
+    today = _item("pubmed", "today", date="2026-11-10T00:00:00.000Z")
+    recent = _item("pubmed", "recent", date="2026-10-01T00:00:00.000Z")
+    old = _item("openalex", "old", date="2019-01-01T00:00:00.000Z")
+    undated = _item("crossref", "undated", date="1970-01-01T00:00:00.000Z")
+    pool = [future_far, old, future_near, undated, recent, today]
+
+    ordered = sp._order_and_cap(pool, 10, None, now=now)
+    assert [i.id for i in ordered] == [
+        "crossref:far", "crossref:near",     # both count as now; incoming order kept
+        "pubmed:today", "pubmed:recent", "openalex:old", "crossref:undated",
+    ]
+    # How far ahead the date is makes no difference: swap them and they swap.
+    swapped = [future_near, old, future_far, undated, recent, today]
+    assert [i.id for i in sp._order_and_cap(swapped, 2, None, now=now)] == [
+        "crossref:near", "crossref:far",
+    ]
+    # The stored date is not rewritten.
+    assert ordered[0].date_iso == "2027-05-01T00:00:00.000Z"
+    # since_year set: the incoming order still stands, untouched.
+    assert sp._order_and_cap(pool, 10, 2020, now=now) == pool
+
+
+def test_crossref_is_asked_for_relevance_order():
+    """No sort parameter on the Crossref query: sort=published returned the
+    newest records matching any one query word."""
+    import sources.crossref as cr
+
+    seen = {}
+
+    async def fake_get_json(client, url):
+        seen["url"] = url
+        return {"message": {"items": []}}
+
+    orig = cr.get_json
+    cr.get_json = fake_get_json
+    try:
+        asyncio.run(cr.fetch_crossref(None, "PHGDH inhibitors", 75))
+        assert "sort=" not in seen["url"] and "order=" not in seen["url"]
+        assert "query=PHGDH%20inhibitors" in seen["url"] and "rows=75" in seen["url"]
+        asyncio.run(cr.fetch_crossref(None, "PHGDH inhibitors", 75, since_year=2024))
+        assert seen["url"].endswith("&filter=from-pub-date:2024-01-01")
+    finally:
+        cr.get_json = orig

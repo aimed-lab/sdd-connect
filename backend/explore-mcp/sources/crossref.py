@@ -2,8 +2,8 @@
 sources/crossref.py — Crossref works fetcher.
 
 Port of the original TypeScript Crossref fetcher. Same URL, same field mapping,
-same blank-title drop, and the same non-article `type` guard (books, chapters,
-indices are dropped at fetch time). Crossref exposes no ranking metric, so every
+same blank-title drop, and a `type` guard that keeps article-like records only
+(see _CROSSREF_ARTICLE_TYPES; everything else is dropped at fetch time). Crossref exposes no ranking metric, so every
 Item's `signal` stays None.
 """
 
@@ -18,21 +18,20 @@ from models import Item
 
 from .base import filter_quality, get_json, to_iso
 
-# Crossref `type` values that aren't research articles — dropped at fetch time.
-_CROSSREF_NON_ARTICLE_TYPES = {
-    "book", "book-chapter", "book-part", "book-section", "book-component",
-    "book-set", "book-series", "edited-book", "monograph", "reference-book",
-    "reference-entry", "other-front-matter", "back-matter", "front-matter",
-}
+# Crossref `type` values kept: journal articles and conference papers. Every
+# other type is dropped at fetch time: books and chapters, and also components
+# (supplementary files), peer reviews, datasets and dissertations, which carry
+# an article's title but usually no date and no authors.
+# "posted-content" (preprints) is kept as before; it lands in Papers.
+_CROSSREF_ARTICLE_TYPES = {"journal-article", "proceedings-article", "posted-content"}
 
 
 async def fetch_crossref(
     client: httpx.AsyncClient, term: str, cap: int, since_year: int | None = None
 ) -> list[Item]:
-    url = (
-        f"https://api.crossref.org/works?query={quote(term)}"
-        f"&rows={cap}&sort=published&order=desc"
-    )
+    # No sort parameter: Crossref then orders by relevance to the query. With
+    # sort=published the page was the newest records matching ANY query word.
+    url = f"https://api.crossref.org/works?query={quote(term)}&rows={cap}"
     if since_year is not None:
         url += f"&filter=from-pub-date:{since_year}-01-01"
     data = await get_json(client, url)
@@ -42,7 +41,7 @@ async def fetch_crossref(
         titles = w.get("title") or []
         if not titles or not titles[0]:   # blank-title drop
             continue
-        if (w.get("type") or "").lower() in _CROSSREF_NON_ARTICLE_TYPES:
+        if (w.get("type") or "").lower() not in _CROSSREF_ARTICLE_TYPES:
             continue
 
         parts = ((w.get("issued") or {}).get("date-parts") or [[]])[0]

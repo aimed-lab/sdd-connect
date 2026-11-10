@@ -97,16 +97,17 @@ function clauses(query: string): Clause[] {
 }
 
 /** "What do you need done?": every word typed must appear in the name, the
- *  services or the description (any order), or one of its synonyms must (see
- *  synonyms.ts). Synonyms match whole words / word starts, so "ai" does not
+ *  services, the description or the category label (any order), or one of its
+ *  synonyms must (see synonyms.ts). Synonyms match whole words / word starts, so "ai" does not
  *  match "main". An empty search matches all. */
 export function matchesQuery(
-  p: Pick<Provider, "name" | "services" | "description">,
+  p: Pick<Provider, "name" | "services" | "description"> & { category?: string },
   query: string
 ): boolean {
   const cs = clauses(query);
   if (cs.length === 0) return true;
-  const hay = words([p.name, ...p.services, p.description].join(" ")).join(" ");
+  const label = p.category ? categoryLabel(p.category) : "";
+  const hay = words([p.name, ...p.services, p.description, label].join(" ")).join(" ");
   const padded = ` ${hay} `;
   return cs.every((c) =>
     c.plain !== null

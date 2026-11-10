@@ -432,7 +432,13 @@ export default function AssistantChat() {
 
   // Focus the input when the panel opens, after each reply and after New chat.
   useEffect(() => {
-    if (open && !typing) inputRef.current?.focus();
+    const el = inputRef.current;
+    if (!open || typing || !el) return;
+    // Already in the box (typing the next message): leave the caret where it is.
+    if (document.activeElement === el) return;
+    el.focus();
+    // A prefilled prompt: put the caret after it, so typing continues the sentence.
+    el.setSelectionRange(el.value.length, el.value.length);
   }, [open, typing, focusTick]);
 
   // Progress text while waiting: step through the stages, then hold the last.
@@ -816,6 +822,9 @@ export default function AssistantChat() {
   const pickStarter = (st: (typeof STARTERS)[number]) => {
     if (st.kind === "soon") return;
     if (st.kind === "go") {
+      // Expanded (or on a phone) the panel covers the page being opened.
+      setExpanded(false);
+      closeOnPhone();
       router.push(st.href);
       return;
     }
@@ -832,7 +841,9 @@ export default function AssistantChat() {
   };
 
   const seeAll = () => {
-    // On a phone the panel covers the page, so close it to show the results.
+    // On a phone the panel covers the page, so close it to show the results;
+    // expanded on a desktop it does too, so collapse it.
+    setExpanded(false);
     closeOnPhone();
     window.setTimeout(() => {
       document.getElementById(RESULTS_ANCHOR)?.scrollIntoView({ behavior: "smooth", block: "start" });
