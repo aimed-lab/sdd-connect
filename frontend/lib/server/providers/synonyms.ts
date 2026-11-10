@@ -11,4 +11,7 @@ export const SYNONYM_GROUPS: string[][] = [
   ["hts", "high-throughput screening", "screening"],
   ["cdmo", "manufacturing"],
   ["ai", "machine learning", "ml"],
+  ["synthesis", "medicinal chemistry", "chemistry cro"],
+  ["antibodies", "antibody"],
+  ["docking", "virtual screening"],
 ];

@@ -43,7 +43,7 @@ export default function QuestionBox({
           type="text"
           aria-label="Your question"
           placeholder={placeholder}
-          className="w-full h-16 px-6 pr-16 sm:pr-48 bg-white border border-outline-variant/40 rounded-[16px] focus:ring-2 focus:ring-primary focus:border-primary text-body-lg font-body-lg placeholder:text-secondary/50 transition-all shadow-[0_1px_2px_rgba(25,28,30,0.04)]"
+          className="w-full h-16 px-6 pr-16 sm:pr-48 bg-white border border-outline-variant/40 rounded-[16px] focus:ring-2 focus:ring-primary focus:border-primary text-body-lg font-body-lg text-on-background caret-on-background placeholder:text-secondary/50 transition-all shadow-[0_1px_2px_rgba(25,28,30,0.04)]"
         />
         <button
           type="submit"

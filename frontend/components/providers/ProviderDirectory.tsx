@@ -2,8 +2,8 @@
 
 // The search box, category chips and card grid of /collaborate/providers. The
 // whole list is passed in (22 companies), so searching and filtering are
-// instant and client side: every word typed must appear in the name, services
-// or description.
+// instant and client side: every word typed must appear in the name, services,
+// description or category label.
 
 import { useMemo, useState } from "react";
 import { categoryCounts, filterProviders, type Provider } from "@/lib/server/providers/core";
@@ -35,7 +35,7 @@ export default function ProviderDirectory({ providers }: { providers: Provider[]
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="What do you need done? e.g. synthesis, antibodies, docking"
+          placeholder="What do you need done? e.g. synthesis, protein expression, docking"
           aria-label="What do you need done?"
           className="w-full h-14 bg-white border border-outline-variant/40 rounded-[14px] pl-12 pr-4 font-body-md text-body-md text-on-background placeholder:text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all"
         />

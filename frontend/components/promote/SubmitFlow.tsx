@@ -219,7 +219,6 @@ export default function SubmitFlow({
       setArticleBody(json.articleBody);
       setLinkedinPost(json.linkedinPost);
       setAuthors(authorsStr);
-      setType("paper");
       // Filled by the generator from the article's own text; blank where the
       // text does not support a fact.
       const paperFacts: KeyFact[] | undefined = Array.isArray(json.keyFacts) ? json.keyFacts : undefined;
@@ -274,9 +273,12 @@ export default function SubmitFlow({
       .map((s) => s.trim())
       .filter(Boolean);
 
-    if (!oneLiner.trim() || !contrast.trim() || specifics.length < 3 || !context.trim() || !audience.trim()) {
+    const othersFilled = Boolean(oneLiner.trim() && contrast.trim() && context.trim() && audience.trim());
+    if (!othersFilled || specifics.length < 3) {
       setStructError({
-        message: "Answer all five questions (at least three specifics) to generate a post.",
+        message: othersFilled
+          ? "Put each item on its own line (at least three)."
+          : "Answer all five questions (at least three specifics) to generate a post.",
         retryable: false,
       });
       return;
@@ -392,7 +394,7 @@ export default function SubmitFlow({
           id: entry.id,
           slug: entry.slug,
           published: false,
-          type,
+          type: paper ? "paper" : type,
           headline,
           standfirst,
           articleBody,
