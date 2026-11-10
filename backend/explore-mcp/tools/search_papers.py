@@ -44,6 +44,7 @@ from cache import STALE_SOURCE, TTL_SOURCE, cache, normalize_key
 from dedupe import merge_items
 from models import Item
 from ranking import rank_papers_winner, relevance_seed_ids
+from sources.base import now_iso
 from sources.crossref import fetch_crossref
 from sources.openalex import SORT_RELEVANCE, fetch_openalex
 from sources.pubmed import fetch_pubmed
@@ -69,8 +70,8 @@ _SOURCE_NAMES = ("pubmed", "openalex", "crossref")
 #     search_papers uses, see fetch_openalex's `sort` param below) buries a
 #     couple of them below rank 10.
 #   * a broad, hot query ("KRAS inhibitor") has thousands of recent papers,
-#     so 75 relevance-ranked OpenAlex results (or date-sorted PubMed/Crossref
-#     results, which are already date-sorted regardless of pool size) are
+#     so 75 relevance-ranked OpenAlex and Crossref results (or date-sorted
+#     PubMed results, which are already date-sorted regardless of pool size) are
 #     virtually guaranteed to include plenty from 2024-2026 without pulling
 #     an unreasonably large page (225 total across 3 sources per query,
 #     vs. 30 before — a real but bounded increase in per-search network cost).
@@ -162,7 +163,9 @@ async def _ranked_pool(
     )
 
 
-def _order_and_cap(ranked: list[Item], limit: int, since_year: int | None) -> list[Item]:
+def _order_and_cap(
+    ranked: list[Item], limit: int, since_year: int | None, now: str | None = None
+) -> list[Item]:
     """Final ordering step, applied AFTER WINNER's re-rank.
 
     DEFAULT (since_year is None — every current caller): unconditional
@@ -176,9 +179,19 @@ def _order_and_cap(ranked: list[Item], limit: int, since_year: int | None) -> li
     since_year supplied (internal/future use, e.g. a status-filter-style
     caller — not reachable from the current UI): kept exactly as before,
     WINNER/_rank_merge's own order stands, no date re-sort on top of it.
+
+    A date later than now (an upcoming issue's cover date) sorts as if it were
+    now: it stays among the newest rows, but how far ahead its date is gives
+    it no extra rank. Rows that tie keep the order they came in. `now` is a UTC ISO string, for
+    tests; default the current time.
     """
     if since_year is None:
-        ranked = sorted(ranked, key=lambda i: i.date_iso or "", reverse=True)
+        cutoff = now or now_iso()
+        ranked = sorted(
+            ranked,
+            key=lambda i: min(i.date_iso or "", cutoff),
+            reverse=True,
+        )
     return ranked[:limit]
 
 
