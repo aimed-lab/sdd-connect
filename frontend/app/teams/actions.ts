@@ -9,12 +9,16 @@ import { revalidatePath } from "next/cache";
 import { getCurrentUser, UnauthorizedError } from "@/lib/auth";
 import {
   addPageToTeam,
+  clearHandoverSlot,
   createTeam,
+  deleteProgressUpdate,
   joinTeam,
   linkTeamToCommunity,
   listMyTeams,
+  postProgressUpdate,
   removePageFromTeam,
   searchPagesForTeam,
+  setHandoverSlot,
   unlinkTeamFromCommunity,
   updateTeamDetails,
   type PageChoice,
@@ -153,6 +157,66 @@ export async function removeTeamPageAction(teamId: string, slug: string, pageId:
     return { ok: true };
   } catch (e) {
     return fail(e, "removeTeamPageAction");
+  }
+}
+
+// ── progress updates ────────────────────────────────────────────────────────
+
+/** Post a short progress update tagged Done, Working on or Stuck (any member). */
+export async function postProgressAction(
+  teamId: string,
+  slug: string,
+  input: { text: string; tag: string }
+): Promise<TeamActionResult> {
+  if (!teamId) return { ok: false, error: "Missing team." };
+  try {
+    const res = await postProgressUpdate(teamId, input);
+    if (res.status !== "ok") return { ok: false, error: res.error };
+    revalidatePath(`/teams/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    return fail(e, "postProgressAction");
+  }
+}
+
+/** Delete a progress update (its author or a lead). */
+export async function deleteProgressAction(teamId: string, slug: string, updateId: string): Promise<TeamActionResult> {
+  if (!teamId || !updateId) return { ok: false, error: "Missing update." };
+  try {
+    const res = await deleteProgressUpdate(teamId, updateId);
+    if (res.status !== "ok") return { ok: false, error: res.error };
+    revalidatePath(`/teams/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    return fail(e, "deleteProgressAction");
+  }
+}
+
+// ── handover ────────────────────────────────────────────────────────────────
+
+/** Fill or change one Handover row: a link (box, github, report) or the note. */
+export async function setHandoverAction(teamId: string, slug: string, slot: string, value: string): Promise<TeamActionResult> {
+  if (!teamId || !slot) return { ok: false, error: "Missing handover row." };
+  try {
+    const res = await setHandoverSlot(teamId, slot, value);
+    if (res.status !== "ok") return { ok: false, error: res.error };
+    revalidatePath(`/teams/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    return fail(e, "setHandoverAction");
+  }
+}
+
+/** Empty one Handover row (whoever added it, or a lead). */
+export async function clearHandoverAction(teamId: string, slug: string, slot: string): Promise<TeamActionResult> {
+  if (!teamId || !slot) return { ok: false, error: "Missing handover row." };
+  try {
+    const res = await clearHandoverSlot(teamId, slot);
+    if (res.status !== "ok") return { ok: false, error: res.error };
+    revalidatePath(`/teams/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    return fail(e, "clearHandoverAction");
   }
 }
 

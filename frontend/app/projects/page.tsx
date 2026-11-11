@@ -68,7 +68,7 @@ export default async function ProjectsPage({
           <span className="min-w-0">
             <span className="block font-title text-[20px] font-medium text-on-background">ColaboFest 2026 projects</span>
             <span className="block mt-1 font-body-md text-body-md text-secondary">
-              See how every winner project you lead or manage is doing.
+              See how every ColaboFest project you lead or manage is doing.
             </span>
           </span>
           <span className="shrink-0 flex items-center gap-2 font-label-md text-label-md text-primary">

@@ -286,3 +286,150 @@ export function parseTeamId(raw: unknown): string | null {
 export function teamCreatedReply(name: string): string {
   return `I created a team for you: ${name}. You are its lead. Open it to add people and share material.`;
 }
+
+// ── progress updates ────────────────────────────────────────────────────────
+// A progress update is a community_announcements row with progress_tag set
+// (database/migrations/2026-11-11_team_progress_handover.sql). Its text is the
+// row's title. A row without a tag is ordinary Team news.
+
+export const PROGRESS_TAGS = ["done", "working", "stuck"] as const;
+export type ProgressTag = (typeof PROGRESS_TAGS)[number];
+
+export const DEFAULT_PROGRESS_TAG: ProgressTag = "working";
+
+export const PROGRESS_TAG_LABEL: Record<ProgressTag, string> = {
+  done: "Done",
+  working: "Working on",
+  stuck: "Stuck",
+};
+
+export function isProgressTag(v: unknown): v is ProgressTag {
+  return v === "done" || v === "working" || v === "stuck";
+}
+
+export const PROGRESS_TEXT_MAX = 280;
+/** How many updates the Progress card shows before "See older updates". */
+export const PROGRESS_SHOWN = 5;
+
+/** One line of text: line breaks and runs of spaces become one space. */
+export function parseProgressText(raw: unknown): { ok: true; text: string } | { ok: false; error: string } {
+  const text = typeof raw === "string" ? raw.replace(/\s+/g, " ").trim() : "";
+  if (!text) return { ok: false, error: "Write a short update first." };
+  if (text.length > PROGRESS_TEXT_MAX) return { ok: false, error: `Keep the update under ${PROGRESS_TEXT_MAX} letters.` };
+  return { ok: true, text };
+}
+
+/** Splits a team's announcements into Team news (no tag) and Progress (tagged),
+ *  keeping the order they came in (newest first). `tags` maps an announcement
+ *  id to its tag; an id that is not in it, or has an unknown tag, is news. */
+export function splitAnnouncements<T extends { id: string }>(
+  items: T[],
+  tags: Record<string, string | null | undefined>
+): { news: T[]; progress: (T & { tag: ProgressTag })[] } {
+  const news: T[] = [];
+  const progress: (T & { tag: ProgressTag })[] = [];
+  for (const item of items) {
+    const tag = tags[item.id];
+    if (isProgressTag(tag)) progress.push({ ...item, tag });
+    else news.push(item);
+  }
+  return { news, progress };
+}
+
+/** The latest five, or all of them once "See older updates" was pressed. */
+export function shownProgress<T>(items: T[], expanded: boolean): { shown: T[]; older: number } {
+  if (expanded || items.length <= PROGRESS_SHOWN) return { shown: items, older: 0 };
+  return { shown: items.slice(0, PROGRESS_SHOWN), older: items.length - PROGRESS_SHOWN };
+}
+
+/** The author or a lead deletes a progress update. */
+export function canDeleteProgress(v: { isLead: boolean; authorId: string; viewerId: string }): boolean {
+  return v.isLead || (!!v.viewerId && v.authorId === v.viewerId);
+}
+
+// ── handover ────────────────────────────────────────────────────────────────
+// A handover row is a community_resources row with handover_slot set (same
+// migration): at most one per slot per team. A link is in `url`; the note is in
+// `description`. A row without a slot is an ordinary shared document.
+
+export const HANDOVER_SLOTS = [
+  { key: "box", label: "Box folder", kind: "link", resourceType: "folder" },
+  { key: "github", label: "GitHub repository", kind: "link", resourceType: "link" },
+  { key: "report", label: "Final report", kind: "link", resourceType: "link" },
+  { key: "note", label: "Handover note", kind: "note", resourceType: "notes" },
+] as const;
+export type HandoverSlot = (typeof HANDOVER_SLOTS)[number]["key"];
+
+export function isHandoverSlot(v: unknown): v is HandoverSlot {
+  return HANDOVER_SLOTS.some((s) => s.key === v);
+}
+
+export const HANDOVER_NOTE_MAX = 1000;
+export const HANDOVER_NOTE_HINT = "What is done, what is left, who to ask";
+
+/** A link must be http or https. Returns it normalized. */
+export function parseHandoverLink(raw: unknown): { ok: true; url: string } | { ok: false; error: string } {
+  const text = typeof raw === "string" ? raw.trim() : "";
+  if (!text) return { ok: false, error: "Paste a link first." };
+  try {
+    const u = new URL(text);
+    if (u.protocol === "http:" || u.protocol === "https:") return { ok: true, url: u.toString() };
+  } catch {
+    /* not a URL */
+  }
+  return { ok: false, error: "Please paste a link that starts with http:// or https://." };
+}
+
+/** Plain text, at most 1000 characters. */
+export function parseHandoverNote(raw: unknown): { ok: true; note: string } | { ok: false; error: string } {
+  const note = typeof raw === "string" ? raw.replace(/\r\n/g, "\n").trim() : "";
+  if (!note) return { ok: false, error: "Write the note first." };
+  if (note.length > HANDOVER_NOTE_MAX) return { ok: false, error: `Keep the note under ${HANDOVER_NOTE_MAX} characters.` };
+  return { ok: true, note };
+}
+
+/** What a slot stores: a link in `url`, or the note in `description`. */
+export function parseHandoverValue(
+  slot: HandoverSlot,
+  raw: unknown
+): { ok: true; url: string | null; description: string } | { ok: false; error: string } {
+  if (slot === "note") {
+    const n = parseHandoverNote(raw);
+    return n.ok ? { ok: true, url: null, description: n.note } : n;
+  }
+  const l = parseHandoverLink(raw);
+  return l.ok ? { ok: true, url: l.url, description: "" } : l;
+}
+
+export type HandoverRow<T> = { slot: HandoverSlot; label: string; kind: "link" | "note"; resource: T | null };
+
+/** Splits a team's resources into the four Handover rows (always four, in
+ *  order, empty ones included) and the ordinary Shared documents. `slots` maps
+ *  a resource id to its slot. A slotted row that is not usable (a link slot
+ *  with no link, a note with no text) leaves its slot empty and is not shown
+ *  as a document either. */
+export function splitResources<T extends { id: string; url: string | null; description: string }>(
+  resources: T[],
+  slots: Record<string, string | null | undefined>
+): { handover: HandoverRow<T>[]; documents: T[] } {
+  const bySlot = new Map<HandoverSlot, T>();
+  const documents: T[] = [];
+  for (const r of resources) {
+    const slot = slots[r.id];
+    if (!isHandoverSlot(slot)) documents.push(r);
+    else if (!bySlot.has(slot)) bySlot.set(slot, r);
+  }
+  const handover = HANDOVER_SLOTS.map((s) => {
+    const r = bySlot.get(s.key) ?? null;
+    const filled = !!r && (s.kind === "note" ? !!r.description.trim() : !!r.url && /^https?:\/\//i.test(r.url));
+    return { slot: s.key, label: s.label, kind: s.kind, resource: filled ? r : null };
+  });
+  return { handover, documents };
+}
+
+/** Whoever added a handover row, or a lead, changes or removes it. Anyone on
+ *  the team fills an empty one. */
+export function canChangeHandover(v: { isLead: boolean; addedBy: string | null; viewerId: string }): boolean {
+  if (v.addedBy === null) return true;
+  return v.isLead || (!!v.viewerId && v.addedBy === v.viewerId);
+}
