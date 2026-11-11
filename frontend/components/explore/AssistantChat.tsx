@@ -16,7 +16,7 @@
 //   "save as a wiki page" offer, and related questions. The main page follows
 //   the search the BACKEND says it ran (/explore/<query>).
 // - The Private / Team / Public picker is shown straight away only when the
-//   researcher says what they work on or asks for a page; otherwise "Save page"
+//   researcher says what they work on or asks for a page; otherwise "Follow this topic"
 //   in the offer box opens it.
 //
 // SAFETY PATTERN (same as the project agent): the model only PROPOSES. The
@@ -58,6 +58,7 @@ import {
   isPagePick,
   parseMarkdown,
   resolveTopic,
+  shouldMovePage,
   shouldShowPicker,
   pickResultCards,
   quickFacts,
@@ -74,7 +75,7 @@ import { TeamDraftCard, TeamListCard, type TeamListState } from "@/components/ex
 import { detectTeamIntent, teamDraftReply, teamListReply, type TeamIntent } from "@/lib/server/assistant/teamIntent";
 import { listMyTeamsAction } from "@/app/teams/actions";
 import { createCommunityAction, joinCommunityAction } from "@/app/communities/actions";
-import { ASSISTANT_EVENT, getPageTeam, parseAssistantRequest, type AssistantRequest, type AssistantTeam } from "@/lib/server/assistant/assistantBridge";
+import { ASSISTANT_EVENT, getPageTeam, parseAssistantRequest, shownUserText, type AssistantRequest, type AssistantTeam } from "@/lib/server/assistant/assistantBridge";
 import { canCreateCommunityAction } from "@/app/communities/actions";
 import { TEAM_VISIBLE_NOTE, teamSlugFromPath, teamTopicFromMessage } from "@/lib/server/teams/teamRules";
 import {
@@ -457,7 +458,8 @@ export default function AssistantChat() {
   };
   useEffect(fitInput, [input]);
 
-  const send = async (text: string) => {
+  // `stay`: a "Follow this topic" click. The page behind keeps its search.
+  const send = async (text: string, opts: { stay?: boolean } = {}) => {
     const content = text.trim();
     if (!content || typing || !user) return;
     // The search is whatever the backend reports it ran; until then, a guess
@@ -465,7 +467,7 @@ export default function AssistantChat() {
     const next: ChatMessage[] = [...messages, { role: "user", content }];
 
     // A clear team command: answer it here. No backend call, no search, no
-    // page move, no Save page, no Related questions.
+    // page move, no "Follow this topic" strip, no Related questions.
     const teamIntent = detectTeamIntent(content);
     if (teamIntent) {
       const index = next.length;
@@ -501,7 +503,7 @@ export default function AssistantChat() {
       return;
     }
     // A community request (or the answer to "which topic?") is not an Explore
-    // search: no panel search, no page move, no cards / facts / Save page / Related.
+    // search: no panel search, no page move, no cards / facts / "Follow this topic" strip / Related.
     const communityTurn = isCommunityTurn(next);
     const guess = communityTurn ? "" : topicFromMessage(content);
     setMessages(next);
@@ -543,8 +545,8 @@ export default function AssistantChat() {
         ? ""
         : onTeam
           ? teamTopicFromMessage(content)
-          : resolveTopic({ content, backendQuery: parsed.query });
-      if (!onTeam && topic && topic.toLowerCase() !== query.toLowerCase()) {
+          : resolveTopic({ content, backendQuery: parsed.query, stay: opts.stay });
+      if (topic && shouldMovePage({ topic, current: query, onTeam, stay: opts.stay })) {
         router.push(`/explore/${encodeURIComponent(topic)}`);
       }
 
@@ -633,7 +635,7 @@ export default function AssistantChat() {
     setTeam(req.team ?? null);
     setOpen(true);
     if (req.mode === "open") setFocusTick((t) => t + 1);
-    else if (req.mode === "send") void send(req.text);
+    else if (req.mode === "send") void send(req.text, { stay: req.stay });
     else {
       // For a team page the prompt ends "about: " so the topic can be typed straight after.
       setInput(req.team ? `${req.text} ` : req.text);
@@ -1023,7 +1025,7 @@ export default function AssistantChat() {
                   </div>
                 ) : (
                   <h3 key={i} className="font-title text-[24px] leading-snug font-medium text-on-background break-words">
-                    {m.content}
+                    {shownUserText(m.content)}
                   </h3>
                 );
               }
@@ -1046,7 +1048,7 @@ export default function AssistantChat() {
 
                   <div className="flex flex-col gap-2">
                     {ex && (
-                      <span className="font-label-sm text-[11px] tracking-[0.12em] uppercase text-secondary">Answer</span>
+                      <span className="font-label-sm text-[11px] tracking-[0.12em] uppercase text-secondary">AI summary</span>
                     )}
                     <div className="font-body-md text-body-md text-on-background leading-relaxed">
                       <Markdown text={m.content} maxCite={ex ? ex.cards.length : 0} />
@@ -1121,8 +1123,8 @@ export default function AssistantChat() {
                   {ex && ex.offerSave && pickerAt !== i && !pageCreated && (
                     <div className="rounded-xl border border-outline-variant bg-surface-container-low p-3.5 flex items-center gap-3">
                       <p className="flex-1 font-body-sm text-body-sm text-on-background">
-                        <strong className="font-semibold">Working on this?</strong> Save it as a wiki page that
-                        collects new papers and trials daily.
+                        <strong className="font-semibold">Want updates on this?</strong> Follow this topic to get a
+                        page that adds new papers and trials daily.
                       </p>
                       <button
                         type="button"
@@ -1130,7 +1132,7 @@ export default function AssistantChat() {
                         disabled={busy}
                         className="btn-primary shrink-0 px-4 py-2 rounded-lg font-label-md text-label-md disabled:opacity-50"
                       >
-                        Save page
+                        Follow this topic
                       </button>
                     </div>
                   )}

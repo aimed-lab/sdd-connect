@@ -19,7 +19,7 @@ const PAGE_REQUEST_NO_TOPIC =
   /^(?:(?:i(?:'d| would)? (?:like|want|need) to|i want to|can you|could you|please)\s+)?(?:create|make|build|start|set up)\s+(?:me\s+)?(?:a\s+|an\s+|my\s+)?(?:(?:new|living|wiki)\s+)*page(?:\s+for\s+(?:my|our)\s+research|\s+for\s+me)?[\s.!?]*$/i;
 
 const LEAD = new RegExp(
-  "^(?:(?:please|can you|could you|i'd like you to)\\s+)?" +
+  "^(?:(?:please|can you|could you|i'd like you to|i(?:'d| would) like to|i (?:want|need) to)\\s+)?" +
     "(?:(?:" +
     [
       "(?:create|make|build|start)\\s+(?:me\\s+)?(?:a\\s+|an\\s+)?(?:(?:new|living|wiki)\\s+)*page\\s+(?:on|about|for)",
@@ -542,11 +542,21 @@ export function isPagePick(text: string): boolean {
 
 /** The search the main page should follow. The backend's own query wins; when it
  *  sends none (an older backend, or `null`) the message's own topic is used, so
- *  a topic question always moves the page. A page-type pick is never a search. */
-export function resolveTopic(args: { content: string; backendQuery?: string | null }): string | null {
+ *  a topic question always moves the page. A page-type pick is never a search.
+ *  `stay` (a "Follow this topic" click): only a search the backend really ran
+ *  counts; the message's own words are never turned into a topic. */
+export function resolveTopic(args: { content: string; backendQuery?: string | null; stay?: boolean }): string | null {
   if (isPagePick(args.content)) return null;
   const q = typeof args.backendQuery === "string" ? args.backendQuery.trim() : "";
+  if (args.stay) return q || null;
   return q || topicFromMessage(args.content);
+}
+
+/** Should the main page move to /explore/<topic>? Not on a team page, not for a
+ *  "Follow this topic" click (`stay`), and not when it is already there. */
+export function shouldMovePage(args: { topic: string | null; current: string; onTeam: boolean; stay?: boolean }): boolean {
+  const topic = (args.topic ?? "").trim();
+  return !args.onTeam && !args.stay && !!topic && topic.toLowerCase() !== args.current.toLowerCase();
 }
 
 /** Show the Private / Team / Public picker straight away? Only when the
