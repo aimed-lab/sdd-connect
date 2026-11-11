@@ -38,7 +38,8 @@ export function tileStatusLines(a: {
   return {
     tasks,
     files: a.hasFolder ? "Open your Box folder" : "Not linked yet",
-    announcements: a.announcementsNew > 0 ? `${a.announcementsNew} new` : "Nothing new",
+    // The tile's badge already shows the count ("2 new").
+    announcements: a.announcementsNew > 0 ? "New this week" : "Nothing new",
     team: `${a.memberCount} ${a.memberCount === 1 ? "member" : "members"}`,
     timeline: a.nextDateShown ? `Next: ${a.nextDateShown}` : null,
     manage: "Links and settings",

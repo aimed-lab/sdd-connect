@@ -38,9 +38,9 @@ test("Files: linked or not", () => {
   assert.equal(lines({ hasFolder: false }).files, "Not linked yet");
 });
 
-test("Announcements: the new count, or Nothing new", () => {
-  assert.equal(lines().announcements, "2 new");
-  assert.equal(lines({ announcementsNew: 1 }).announcements, "1 new");
+test("Announcements: New this week (the badge has the count), or Nothing new", () => {
+  assert.equal(lines().announcements, "New this week");
+  assert.equal(lines({ announcementsNew: 1 }).announcements, "New this week");
   assert.equal(lines({ announcementsNew: 0 }).announcements, "Nothing new");
 });
 

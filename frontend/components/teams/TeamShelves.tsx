@@ -5,6 +5,8 @@
 // a serif title, a count chip and, where it makes sense, a small "+ Add"
 // button that opens the matching tile panel. Remove, Pin and the like sit in
 // the existing ⋯ menu. Every empty state is a dashed box that says what to do.
+// Card, the row and button styles, useDo and Err are also used by the Progress
+// and Handover cards (ProgressCard.tsx, HandoverCard.tsx).
 
 import Link from "next/link";
 import { useState } from "react";
@@ -26,11 +28,11 @@ import type { TeamPage } from "@/lib/server/teams/teams";
 import { useTeamPanel } from "./TeamPanelContext";
 
 const CARD = "rounded-2xl border border-[#e8e4da] bg-white p-5 flex flex-col gap-4 shadow-[0_1px_2px_rgba(40,36,28,0.05)] min-w-0";
-const SMALL_BTN =
+export const SMALL_BTN =
   "inline-flex items-center gap-1 rounded-lg border border-[#d9d5c9] bg-white px-2.5 py-1.5 text-[12.5px] font-semibold leading-5 text-on-background hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
-const ROW = "flex items-center gap-3 min-w-0 py-3 border-t border-[#efece3] first:border-t-0 first:pt-0 last:pb-0";
+export const ROW = "flex items-center gap-3 min-w-0 py-3 border-t border-[#efece3] first:border-t-0 first:pt-0 last:pb-0";
 
-function Card({
+export function Card({
   title,
   count,
   action,
@@ -80,7 +82,7 @@ function AddButton({ onClick, label = "Add" }: { onClick: () => void; label?: st
   );
 }
 
-function useDo() {
+export function useDo() {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -95,7 +97,7 @@ function useDo() {
   return { busy, error, run };
 }
 
-function Err({ text }: { text: string | null }) {
+export function Err({ text }: { text: string | null }) {
   return text ? (
     <p className="font-body-sm text-body-sm text-error" role="alert">
       {text}

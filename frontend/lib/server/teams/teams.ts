@@ -4,7 +4,8 @@
 // news, the pinned resource and the QR join all come from lib/server/
 // communities.ts. This file adds: creating a team, "your teams", wiki pages
 // curated into a team (team_pages), and linking a team to a community
-// (community_teams).
+// (community_teams), progress updates (tagged community_announcements rows) and
+// the Handover card (slotted community_resources rows).
 //
 // Every call here uses the signed-in person's own session, so row level
 // security is the real gate; the checks in code are for clear messages.
@@ -16,13 +17,19 @@ import {
   createCommunity,
   getCommunityById,
   getCommunityBySlug,
+  getCommunityKind,
   getMembership,
   type Community,
 } from "@/lib/server/communities";
 import { getAnonServerClient } from "@/lib/server/supabaseServer";
 import {
+  HANDOVER_SLOTS,
   LINK_MESSAGE,
   canCuratePage,
+  isHandoverSlot,
+  isProgressTag,
+  parseHandoverValue,
+  parseProgressText,
   canLinkTeam,
   canUnlinkTeam,
   visibilityAfterCurate,
@@ -479,4 +486,184 @@ export async function listLinkedTeams(communityId: string): Promise<LinkedTeam[]
     name: r.name,
     member_count: Number(r.member_count) || 0,
   }));
+}
+
+// ── progress updates and handover ───────────────────────────────────────────
+// 2026-11-11_team_progress_handover.sql adds community_announcements.progress_tag
+// and community_resources.handover_slot. Both are read through their OWN small
+// queries, not folded into listAnnouncements / listCommunityResources: until
+// that migration is applied an unknown column would fail those reads and empty
+// the team page (and every community page). Here a failed read is just "no
+// progress updates, nothing in Handover", and the page looks as it did before.
+
+/** Announcement id -> progress tag, for the tagged rows of this team. */
+export async function listProgressTags(teamId: string): Promise<Record<string, string>> {
+  noStore();
+  const session = await getSession();
+  if (!session) return {};
+  const { data, error } = await session.db
+    .from("community_announcements")
+    .select("id, progress_tag")
+    .eq("community_id", teamId)
+    .not("progress_tag", "is", null);
+  if (error || !data) return {};
+  return Object.fromEntries((data as { id: string; progress_tag: string }[]).map((r) => [r.id, r.progress_tag]));
+}
+
+/** Resource id -> handover slot, for the slotted rows of this team. */
+export async function listHandoverSlots(teamId: string): Promise<Record<string, string>> {
+  noStore();
+  const session = await getSession();
+  if (!session) return {};
+  const { data, error } = await session.db
+    .from("community_resources")
+    .select("id, handover_slot")
+    .eq("community_id", teamId)
+    .not("handover_slot", "is", null);
+  if (error || !data) return {};
+  return Object.fromEntries((data as { id: string; handover_slot: string }[]).map((r) => [r.id, r.handover_slot]));
+}
+
+export type TeamWriteResult = { status: "ok" } | { status: "error"; error: string };
+
+const NOT_READY =
+  "Couldn't save that. If it keeps happening, the team progress and handover migration may not have been applied yet.";
+
+/** An active member of a TEAM, or the message to show. Communities are refused:
+ *  nothing here applies to them. */
+async function requireTeamMember(teamId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  if ((await getCommunityKind(teamId)) !== "team") return { ok: false, error: "This is only for teams." };
+  const membership = await getMembership(teamId);
+  if (membership.state !== "active") return { ok: false, error: "Only team members can do this." };
+  return { ok: true };
+}
+
+/** Post a progress update. Any active team member; "Community announcements:
+ *  admin or team progress insert" (RLS) is the real gate. The author is the
+ *  session user, never the caller's input. */
+export async function postProgressUpdate(teamId: string, input: { text: string; tag: string }): Promise<TeamWriteResult> {
+  const { user, db } = await requireCurrentUser();
+  const who = await requireTeamMember(teamId);
+  if (!who.ok) return { status: "error", error: who.error };
+
+  const text = parseProgressText(input.text);
+  if (!text.ok) return { status: "error", error: text.error };
+  if (!isProgressTag(input.tag)) return { status: "error", error: "Choose Done, Working on or Stuck." };
+
+  const { error } = await db
+    .from("community_announcements")
+    .insert({ community_id: teamId, author_id: user.id, title: text.text, body: "", progress_tag: input.tag });
+  if (error) {
+    console.error("postProgressUpdate: insert failed", error);
+    return { status: "error", error: NOT_READY };
+  }
+  return { status: "ok" };
+}
+
+/** Delete a progress update: its author or a lead (RLS decides; anyone else's
+ *  attempt matches zero rows). Only a TAGGED row can be deleted here, so this
+ *  is never a way around the lead-only rule for Team news. */
+export async function deleteProgressUpdate(teamId: string, updateId: string): Promise<TeamWriteResult> {
+  const { db } = await requireCurrentUser();
+  const who = await requireTeamMember(teamId);
+  if (!who.ok) return { status: "error", error: who.error };
+
+  const { data, error } = await db
+    .from("community_announcements")
+    .delete()
+    .eq("id", updateId)
+    .eq("community_id", teamId)
+    .not("progress_tag", "is", null)
+    .select("id");
+  if (error) {
+    console.error("deleteProgressUpdate: delete failed", error);
+    return { status: "error", error: "Couldn't delete the update. Please try again." };
+  }
+  if (!data || data.length === 0) {
+    return { status: "error", error: "Only the person who posted this, or a team lead, can delete it." };
+  }
+  return { status: "ok" };
+}
+
+/** Fill or change one Handover slot. An empty slot: any active member adds it.
+ *  A filled one: whoever added it, or a lead, changes it (RLS: "Community
+ *  resources: admin or team uploader update"). Links must be http(s); the note
+ *  is plain text. */
+export async function setHandoverSlot(teamId: string, slot: string, value: string): Promise<TeamWriteResult> {
+  const { user, db } = await requireCurrentUser();
+  const who = await requireTeamMember(teamId);
+  if (!who.ok) return { status: "error", error: who.error };
+  if (!isHandoverSlot(slot)) return { status: "error", error: "Unknown handover row." };
+
+  const parsed = parseHandoverValue(slot, value);
+  if (!parsed.ok) return { status: "error", error: parsed.error };
+  const def = HANDOVER_SLOTS.find((s) => s.key === slot)!;
+
+  const { data: existing, error: readError } = await db
+    .from("community_resources")
+    .select("id")
+    .eq("community_id", teamId)
+    .eq("handover_slot", slot)
+    .maybeSingle();
+  if (readError) {
+    console.error("setHandoverSlot: read failed", readError);
+    return { status: "error", error: NOT_READY };
+  }
+
+  if (existing) {
+    const { data, error } = await db
+      .from("community_resources")
+      .update({ url: parsed.url, description: parsed.description })
+      .eq("id", (existing as { id: string }).id)
+      .eq("community_id", teamId)
+      .select("id");
+    if (error) {
+      console.error("setHandoverSlot: update failed", error);
+      return { status: "error", error: NOT_READY };
+    }
+    if (!data || data.length === 0) {
+      return { status: "error", error: "Only the person who added this, or a team lead, can change it." };
+    }
+    return { status: "ok" };
+  }
+
+  const { error } = await db.from("community_resources").insert({
+    community_id: teamId,
+    added_by: user.id,
+    title: def.label,
+    resource_type: def.resourceType,
+    url: parsed.url,
+    description: parsed.description,
+    handover_slot: slot,
+  });
+  if (error) {
+    console.error("setHandoverSlot: insert failed", error);
+    // Someone else filled the slot a moment ago (the unique index).
+    if (error.code === "23505") return { status: "error", error: "Someone just added this. Reload the page to see it." };
+    return { status: "error", error: NOT_READY };
+  }
+  return { status: "ok" };
+}
+
+/** Empty one Handover slot: whoever added it, or a lead. */
+export async function clearHandoverSlot(teamId: string, slot: string): Promise<TeamWriteResult> {
+  const { db } = await requireCurrentUser();
+  const who = await requireTeamMember(teamId);
+  if (!who.ok) return { status: "error", error: who.error };
+  if (!isHandoverSlot(slot)) return { status: "error", error: "Unknown handover row." };
+
+  const { data, error } = await db
+    .from("community_resources")
+    .delete()
+    .eq("community_id", teamId)
+    .eq("handover_slot", slot)
+    .select("id");
+  if (error) {
+    console.error("clearHandoverSlot: delete failed", error);
+    return { status: "error", error: "Couldn't remove that. Please try again." };
+  }
+  if (!data || data.length === 0) {
+    return { status: "error", error: "Only the person who added this, or a team lead, can remove it." };
+  }
+  return { status: "ok" };
 }
