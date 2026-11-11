@@ -31,7 +31,7 @@ import type { CreateProjectInput, MyProjectSummary } from "@/lib/projectTypes";
 import { classifyChecklistItem } from "@/lib/server/checklistClassify";
 
 const PROJECT_SELECT =
-  "id, name, description, lead_id, deadline, challenge_key, program, created_at";
+  "id, name, description, lead_id, deadline, challenge_key, program, finalist, created_at";
 
 const PROPOSALS_BUCKET = "project-proposals";
 
@@ -445,6 +445,7 @@ export async function listMyProjects(): Promise<ListMyProjectsResult> {
     deadline: (row.deadline as string | null) ?? null,
     challenge_key: (row.challenge_key as string | null) ?? null,
     program: (row.program as string | null) ?? null,
+    finalist: row.finalist === true,
     proposal_submitted: proposalSubmitted.has(row.id as string),
   }));
 

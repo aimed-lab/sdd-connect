@@ -403,7 +403,7 @@ test("program: the project home follows projects.program, registration stays on 
   assert.match(src("lib/server/projectWorkspace/program.ts"), /\.eq\("program", COLABOFEST_PROGRAM\)/);
   assert.match(src("components/projects/ProjectCard.tsx"), /project\.program === COLABOFEST_PROGRAM/);
   assert.match(src("lib/server/agent/agentProjectOps.ts"), /p\.program === COLABOFEST_PROGRAM/);
-  assert.match(src("lib/server/projects.ts"), /challenge_key, program, created_at/);
+  assert.match(src("lib/server/projects.ts"), /challenge_key, program, finalist, created_at/);
   assert.match(src("lib/server/projects.ts"), /challenge_key, program, target/);
 });
 

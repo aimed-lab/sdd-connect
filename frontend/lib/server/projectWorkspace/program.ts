@@ -4,15 +4,13 @@
 // project they are a member of, one card each. Everything is read through the
 // caller's own session, so row-level security decides what comes back (a member
 // sees their own projects' rows and nobody else's); there are no service-role
-// reads. The card is built by the pure buildProgramCard (status.ts).
+// reads. The cards are built and ordered by the pure rules in programCards.ts
+// (finalists first, then by project code).
 
 import { getCurrentUser, getDb } from "@/lib/auth";
 import { COLABOFEST_PROGRAM } from "@/lib/projectTypes";
-import {
-  buildProgramCard,
-  canSeeProgram,
-  type ProgramCard,
-} from "@/lib/server/projectWorkspace/status";
+import { buildProgramCardView, sortProgramCards, type ProgramCardView } from "@/lib/server/projectWorkspace/programCards";
+import { canSeeProgram, todayIso } from "@/lib/server/projectWorkspace/status";
 
 type Row = Record<string, unknown>;
 
@@ -51,7 +49,7 @@ export async function hasProgramAccess(): Promise<boolean> {
   return !!mine && canSeeProgram(mine.rows);
 }
 
-export type ProgramResult = { status: "ok"; cards: ProgramCard[] } | { status: "no_access" } | { status: "error"; error: string };
+export type ProgramResult = { status: "ok"; cards: ProgramCardView[] } | { status: "no_access" } | { status: "error"; error: string };
 
 export async function getColabofestProgram(now: Date = new Date()): Promise<ProgramResult> {
   const mine = await myStaffProjects();
@@ -60,7 +58,7 @@ export async function getColabofestProgram(now: Date = new Date()): Promise<Prog
 
   const { data: projects, error } = await db
     .from("projects")
-    .select("id, name, created_at")
+    .select("id, name, description, finalist")
     .eq("program", COLABOFEST_PROGRAM)
     .order("name", { ascending: true });
   if (error) {
@@ -73,7 +71,7 @@ export async function getColabofestProgram(now: Date = new Date()): Promise<Prog
 
   const [members, items, updates] = await Promise.all([
     db.from("project_members").select("project_id").in("project_id", ids),
-    db.from("checklist_items").select("project_id, status, list_key, due_date").in("project_id", ids),
+    db.from("checklist_items").select("project_id, label, status, list_key, due_date").in("project_id", ids),
     db.from("project_updates").select("project_id, kind, created_at, resolved_at").in("project_id", ids),
   ]);
   for (const r of [members, items, updates]) {
@@ -95,26 +93,32 @@ export async function getColabofestProgram(now: Date = new Date()): Promise<Prog
   const itemRows = by(items.data as Row[] | null);
   const updateRows = by(updates.data as Row[] | null);
 
+  const today = todayIso(now);
   return {
     status: "ok",
-    cards: list.map((p) =>
-      buildProgramCard({
-        id: p.id as string,
-        name: p.name as string,
-        createdAt: (p.created_at as string | null) ?? null,
-        teamSize: (memberRows.get(p.id as string) ?? []).length,
-        items: (itemRows.get(p.id as string) ?? []).map((i) => ({
-          status: i.status as string,
-          list_key: i.list_key as string,
-          due_date: (i.due_date as string | null) ?? null,
-        })),
-        updates: (updateRows.get(p.id as string) ?? []).map((u) => ({
-          kind: u.kind as string,
-          created_at: u.created_at as string,
-          resolved_at: (u.resolved_at as string | null) ?? null,
-        })),
-        now,
-      })
+    cards: sortProgramCards(
+      list.map((p) =>
+        buildProgramCardView({
+          id: p.id as string,
+          name: p.name as string,
+          description: (p.description as string | null) ?? null,
+          finalist: p.finalist === true,
+          teamSize: (memberRows.get(p.id as string) ?? []).length,
+          items: (itemRows.get(p.id as string) ?? []).map((i) => ({
+            label: (i.label as string | null) ?? "",
+            status: i.status as string,
+            list_key: (i.list_key as string | null) ?? null,
+            due_date: (i.due_date as string | null) ?? null,
+          })),
+          updates: (updateRows.get(p.id as string) ?? []).map((u) => ({
+            kind: u.kind as string,
+            created_at: u.created_at as string,
+            resolved_at: (u.resolved_at as string | null) ?? null,
+          })),
+          today,
+          now,
+        })
+      )
     ),
   };
 }
