@@ -4,7 +4,9 @@
 // banner, then "Your projects" header + grid, then the empty state. Nav/
 // Footer come from the root layout — the Stitch file's own header/footer
 // (with invented "Ethics Policy"/"Methodology"/etc. links) are discarded, per
-// that same doc's fix #1.
+// that same doc's fix #1. The cards come ColaboFest finalists first, then the
+// other ColaboFest projects by code, then every other project newest first
+// (sortMyProjects, lib/server/projectWorkspace/programCards.ts).
 //
 // SERVER component, and a REDIRECT rather than a gate panel for a signed-out
 // visitor, matching app/inbox/page.tsx: there is no public project browsing
@@ -20,7 +22,9 @@ import { getCurrentUser } from "@/lib/auth";
 import { listMyProjects } from "@/lib/server/projects";
 import ProjectCard from "@/components/projects/ProjectCard";
 import DeletedNotice, { wasDeleted } from "@/components/DeletedNotice";
+import { COLABOFEST_PROGRAM } from "@/lib/projectTypes";
 import { hasProgramAccess } from "@/lib/server/projectWorkspace/program";
+import { projectCode, sortMyProjects } from "@/lib/server/projectWorkspace/programCards";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
@@ -36,6 +40,18 @@ export default async function ProjectsPage({
   if (!user) redirect("/login?callbackUrl=%2Fprojects");
 
   const [result, showProgram] = await Promise.all([listMyProjects(), hasProgramAccess()]);
+  const projects =
+    result.status === "ok"
+      ? sortMyProjects(
+          result.projects.map((p) => ({
+            project: p,
+            name: p.name,
+            inProgram: p.program === COLABOFEST_PROGRAM,
+            finalist: p.finalist,
+            code: projectCode(p.description),
+          }))
+        ).map((x) => x.project)
+      : [];
 
   return (
     <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-16 md:py-20 flex flex-col gap-12">
@@ -86,7 +102,7 @@ export default async function ProjectsPage({
 
       {result.status === "ok" && result.projects.length > 0 && (
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-gutter">
-          {result.projects.map((p) => (
+          {projects.map((p) => (
             <ProjectCard key={p.id} project={p} />
           ))}
         </section>

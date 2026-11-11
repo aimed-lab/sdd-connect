@@ -74,6 +74,8 @@ export type MyProjectSummary = {
   challenge_key: string | null;
   /** The program the project is in (projects.program), or null. */
   program: string | null;
+  /** A ColaboFest finalist (projects.finalist). */
+  finalist: boolean;
   proposal_submitted: boolean;
 };
 

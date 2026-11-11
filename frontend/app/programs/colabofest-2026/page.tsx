@@ -1,12 +1,14 @@
 // ColaboFest 2026 projects — /programs/colabofest-2026.
 //
 // For anyone who is a lead or manager on at least one ColaboFest project (the
-// program manager across the winner projects, and each team's leads). Lists the
-// ColaboFest projects the viewer is a member of, one card each: team size, a
-// status pill, checklist progress per list, how many items are overdue, the last
-// update, and links to the project's Overview and Updates. All reads use the
-// viewer's own session, so row-level security decides which projects come back.
-// Anyone else gets a 404.
+// program manager across the ColaboFest projects, and each team's leads). Lists
+// the ColaboFest projects the viewer is a member of, finalists first and then by
+// project code, one card each: the code, a Finalist badge, any warning badge,
+// the title, team size, the task lists that have items, one status line (tasks
+// and the last announcement) and links to the project and its announcements.
+// The rules are in lib/server/projectWorkspace/programCards.ts. All reads use
+// the viewer's own session, so row-level security decides which projects come
+// back. Anyone else gets a 404.
 
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -14,18 +16,21 @@ import { notFound, redirect } from "next/navigation";
 import PageHeader, { PageShell } from "@/components/PageHeader";
 import { getCurrentUser } from "@/lib/auth";
 import { getColabofestProgram } from "@/lib/server/projectWorkspace/program";
-import { PILL_LABEL, type StatusPill } from "@/lib/server/projectWorkspace/status";
+import { STALE_ANNOUNCEMENT_LABEL, programCountLine, type TaskStatus } from "@/lib/server/projectWorkspace/programCards";
 import { tabHref } from "@/lib/server/projectWorkspace/workspace";
-import { formatDay } from "@/lib/server/pages/pageViewHelpers";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "ColaboFest 2026 projects | SmartDrugDiscovery", robots: { index: false } };
 
-const PILL_CLASS: Record<StatusPill, string> = {
-  on_track: "bg-surface-container-low text-primary",
-  needs_help: "bg-error/10 text-error",
-  quiet: "bg-amber-100 text-amber-800",
+// The tasks part of the status line: red-brown when overdue, amber when due today.
+const TASK_TONE: Record<TaskStatus["tone"], string> = {
+  overdue: "text-[#9a3412] font-medium",
+  today: "text-[#8a4a00] font-medium",
+  later: "text-secondary",
+  done: "text-secondary",
 };
+
+const BADGE = "rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold leading-4";
 
 export default async function ColabofestProgramPage() {
   const user = await getCurrentUser();
@@ -43,7 +48,7 @@ export default async function ColabofestProgramPage() {
     );
   }
 
-  const needsHelp = result.cards.filter((c) => c.pill === "needs_help").length;
+  const finalists = result.cards.filter((c) => c.finalist).length;
 
   return (
     <PageShell>
@@ -56,12 +61,8 @@ export default async function ColabofestProgramPage() {
       </Link>
       <PageHeader
         title="ColaboFest 2026 projects"
-        subtitle="How each winner project is doing: checklists, overdue items and the latest updates, in one place."
-        statsLine={
-          result.cards.length > 0
-            ? `${result.cards.length} ${result.cards.length === 1 ? "project" : "projects"}${needsHelp > 0 ? ` · ${needsHelp} asking for help` : ""}`
-            : undefined
-        }
+        subtitle="How each ColaboFest project is doing: tasks, due dates and the latest announcements, in one place."
+        statsLine={result.cards.length > 0 ? programCountLine(result.cards.length, finalists) : undefined}
       />
 
       {result.cards.length === 0 ? (
@@ -71,48 +72,60 @@ export default async function ColabofestProgramPage() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {result.cards.map((c) => {
-            const last = formatDay(c.lastUpdate);
-            return (
-              <article key={c.id} className="rounded-2xl bg-white shadow-[0_1px_2px_rgba(40,36,28,0.05)] p-6 flex flex-col gap-4">
-                <div className="flex items-start justify-between gap-3">
-                  <h2 className="font-title text-[22px] leading-tight font-medium text-on-background break-words min-w-0">{c.name}</h2>
-                  <span className={`shrink-0 px-3 py-1 rounded-full font-label-sm text-label-sm ${PILL_CLASS[c.pill]}`}>
-                    {PILL_LABEL[c.pill]}
-                  </span>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {result.cards.map((c) => (
+            <article key={c.id} className="h-full rounded-2xl bg-white shadow-[0_1px_2px_rgba(40,36,28,0.05)] p-6 flex flex-col gap-3 min-w-0">
+              {(c.code || c.finalist || c.needsHelp || c.staleAnnouncement) && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {c.code && <span className="mr-1 text-[12.5px] leading-5 text-secondary">{c.code}</span>}
+                  {c.finalist && <span className={`${BADGE} border border-[#1A5632] text-[#1A5632]`}>★ Finalist</span>}
+                  {c.needsHelp && <span className={`${BADGE} bg-error/10 text-error`}>Needs help</span>}
+                  {c.staleAnnouncement && <span className={`${BADGE} bg-[#f8ecd6] text-[#8a4a00]`}>{STALE_ANNOUNCEMENT_LABEL}</span>}
                 </div>
-                <p className="font-body-sm text-body-sm text-secondary">
-                  {c.teamSize} {c.teamSize === 1 ? "member" : "members"}
-                </p>
+              )}
 
+              <h2 title={c.name} className="font-title text-[22px] leading-tight font-medium text-on-background break-words line-clamp-4">
+                {c.name}
+              </h2>
+              <p className="font-body-sm text-body-sm text-secondary">
+                {c.teamSize} {c.teamSize === 1 ? "member" : "members"}
+              </p>
+
+              {c.rows.length === 0 ? (
+                <p className="font-body-md text-body-md text-secondary">No tasks yet</p>
+              ) : (
                 <ul className="flex flex-col gap-2">
-                  {c.progress.map((p) => (
-                    <li key={p.list} className="flex items-center justify-between gap-3 font-body-md text-body-md">
-                      <span className="text-on-background">{p.label}</span>
-                      <span className="text-secondary shrink-0">{p.total === 0 ? "No items" : `${p.ready} of ${p.total} ready`}</span>
+                  {c.rows.map((r) => (
+                    <li key={r.key} className="flex items-center justify-between gap-3 font-body-md text-body-md">
+                      <span className="text-on-background">{r.label}</span>
+                      <span className="text-secondary shrink-0">
+                        {r.done} of {r.total} done
+                      </span>
                     </li>
                   ))}
                 </ul>
+              )}
 
-                <div className="flex flex-wrap items-center gap-x-5 gap-y-1 font-body-sm text-body-sm">
-                  <span className={c.overdue > 0 ? "text-error font-medium" : "text-secondary"}>
-                    {c.overdue === 0 ? "Nothing overdue" : `${c.overdue} overdue`}
-                  </span>
-                  <span className="text-secondary">{last ? `Last update ${last}` : "No updates yet"}</span>
-                </div>
+              <p className="font-body-sm text-body-sm text-secondary">
+                {c.tasks && (
+                  <>
+                    <span className={TASK_TONE[c.tasks.tone]}>{c.tasks.text}</span>
+                    {" · "}
+                  </>
+                )}
+                {c.announcements}
+              </p>
 
-                <div className="mt-auto pt-2 flex items-center gap-4">
-                  <Link href={tabHref(c.id, "overview")} className="btn-outline px-4 py-2 rounded-lg font-label-md text-label-md">
-                    Overview
-                  </Link>
-                  <Link href={tabHref(c.id, "announcements")} className="font-label-md text-label-md text-primary hover:underline underline-offset-4">
-                    Updates
-                  </Link>
-                </div>
-              </article>
-            );
-          })}
+              <div className="mt-auto pt-2 flex items-center gap-4">
+                <Link href={tabHref(c.id, "overview")} className="btn-primary px-4 py-2 rounded-lg font-label-md text-label-md">
+                  Open project
+                </Link>
+                <Link href={tabHref(c.id, "announcements")} className="font-label-md text-label-md text-primary hover:underline underline-offset-4">
+                  Announcements
+                </Link>
+              </div>
+            </article>
+          ))}
         </div>
       )}
     </PageShell>
