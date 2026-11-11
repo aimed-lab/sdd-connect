@@ -106,6 +106,7 @@ async def fetch_trials(
                     "completion_date": (status.get("completionDateStruct") or {}).get("date"),
                     "enrollment": (design.get("enrollmentInfo") or {}).get("count"),
                     "results_posted": bool(status.get("resultsFirstPostDateStruct")),
+                    "conditions": proto.get("conditionsModule", {}).get("conditions"),
                 },
             )
         )
