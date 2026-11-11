@@ -1,5 +1,9 @@
-// /pages/[slug] — a wiki page: notes with numbered citations, What's new,
-// and every source collected. Server-rendered through the visitor's OWN
+// /pages/[slug] — a wiki page: the header, then five tabs (?tab=): What's new,
+// Papers, Datasets, Background (the page's sections, with numbered citations)
+// and More sources (every other kind collected). Without ?tab= it opens on the
+// viewer's saved tab (the wiki_tab cookie), else What's new when it has
+// something, else Background. Owner controls and the team panel are behind
+// "Page settings". Server-rendered through the visitor's OWN
 // Supabase session (lib/server/pages/pageView.ts), so RLS decides who can see
 // it: signed-out visitors get public pages, owners and team members get theirs.
 //
@@ -8,23 +12,41 @@
 // page's existence is never revealed. Owner controls and the team panel are a
 // convenience for the owner; the server actions and RLS are the real gate.
 
-import { AskAssistantButton } from "@/components/pages/NewWikiPageButton";
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { pageCrumbs } from "@/lib/server/pages/pageEditCore";
+import PageActions from "@/components/pages/PageActions";
 import PageControls from "@/components/pages/PageControls";
 import PageNotes from "@/components/pages/PageNotes";
 import PageSources from "@/components/pages/PageSources";
+import PageTabs from "@/components/pages/PageTabs";
 import TeamPanel from "@/components/pages/TeamPanel";
 import VisibilityBadge from "@/components/pages/VisibilityBadge";
 import WhatsNew from "@/components/pages/WhatsNew";
 import { getPageView } from "@/lib/server/pages/pageView";
-import { VISIBILITY_INFO, creationLine, formatDay, initialSourceCount } from "@/lib/server/pages/pageViewHelpers";
+import {
+  VISIBILITY_INFO,
+  WIKI_TAB_COOKIE,
+  creationLine,
+  formatDay,
+  initialSourceCount,
+  isWikiTab,
+  pickWikiTab,
+  wikiTabCounts,
+} from "@/lib/server/pages/pageViewHelpers";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
-export default async function LivingPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function LivingPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ tab?: string | string[] }>;
+}) {
   const { slug } = await params;
+  const query = await searchParams;
   const result = await getPageView(slug);
   if (result.status === "not_found") notFound();
   if (result.status === "error") {
@@ -42,6 +64,44 @@ export default async function LivingPage({ params }: { params: Promise<{ slug: s
   const updated = formatDay(page.last_refreshed_at);
   const showTeam = viewer.isOwner || (page.visibility === "team" && members.length > 0);
   const empty = notes.length === 0 && evidence.length === 0;
+
+  // Tabs: a valid ?tab= wins; else the viewer's saved choice; else What's new
+  // when it has something; else Background.
+  const savedRaw = (await cookies()).get(WIKI_TAB_COOKIE)?.value;
+  const saved = isWikiTab(savedRaw) ? savedRaw : null;
+  const counts = wikiTabCounts({ updates: updates.length, evidence, notes: notes.length });
+  const tab = pickWikiTab({ param: Array.isArray(query.tab) ? query.tab[0] : query.tab, saved, newCount: counts.new });
+
+  // What "Page settings" opens. The owner: the controls and, off a project, the
+  // Team panel. A member of a team page: the member list, read-only. Anyone
+  // else: nothing, so there is no button.
+  const settings = viewer.isOwner ? (
+    project ? (
+      <PageControls
+        pageId={page.id}
+        slug={page.slug}
+        title={page.title}
+        visibility={page.visibility}
+        refreshEnabled={page.refresh_enabled}
+        projectName={project.name}
+      />
+    ) : (
+      <div className="flex flex-col gap-6">
+        <PageControls
+          pageId={page.id}
+          slug={page.slug}
+          title={page.title}
+          visibility={page.visibility}
+          refreshEnabled={page.refresh_enabled}
+        />
+        <TeamPanel pageId={page.id} slug={page.slug} visibility={page.visibility} members={members} isOwner />
+      </div>
+    )
+  ) : !project && showTeam ? (
+    <div className="max-w-xl">
+      <TeamPanel pageId={page.id} slug={page.slug} visibility={page.visibility} members={members} isOwner={false} />
+    </div>
+  ) : null;
 
   return (
     <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-16 flex flex-col gap-14">
@@ -71,51 +131,16 @@ export default async function LivingPage({ params }: { params: Promise<{ slug: s
         </div>
         <h1 className="mt-3 font-display-lg text-[40px] leading-tight text-on-background">{page.title}</h1>
         <p className="mt-3 font-body-lg text-body-lg text-on-background/80">
-          This page updates itself with new research. Edit it, share it, or ask the assistant to add to it.
+          Everything on this topic in one place. Pick the tab for what you need.
         </p>
         {!project && (
           <p className="mt-2 font-body-sm text-body-sm text-secondary">{VISIBILITY_INFO[page.visibility].line}</p>
         )}
-        <div className="mt-5">
-          <AskAssistantButton title={page.title} />
-        </div>
+        {project && !viewer.isOwner && (
+          <p className="mt-2 font-body-sm text-body-sm text-secondary">Shared with everyone on {project.name}.</p>
+        )}
+        <PageActions title={page.title} settings={settings} />
       </header>
-
-      {project && (viewer.isOwner ? (
-        <PageControls
-          pageId={page.id}
-          slug={page.slug}
-          title={page.title}
-          visibility={page.visibility}
-          refreshEnabled={page.refresh_enabled}
-          projectName={project.name}
-        />
-      ) : (
-        <p className="font-body-md text-body-md text-secondary">Shared with everyone on {project.name}.</p>
-      ))}
-
-      {!project && (viewer.isOwner || showTeam) && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-          {viewer.isOwner && (
-            <PageControls
-              pageId={page.id}
-              slug={page.slug}
-              title={page.title}
-              visibility={page.visibility}
-              refreshEnabled={page.refresh_enabled}
-            />
-          )}
-          {showTeam && (
-            <TeamPanel
-              pageId={page.id}
-              slug={page.slug}
-              visibility={page.visibility}
-              members={members}
-              isOwner={viewer.isOwner}
-            />
-          )}
-        </div>
-      )}
 
       {empty && (
         <div className="glass-panel rounded-2xl p-8 text-center max-w-3xl">
@@ -126,17 +151,10 @@ export default async function LivingPage({ params }: { params: Promise<{ slug: s
         </div>
       )}
 
-      <PageNotes
-        notes={notes}
-        evidence={evidence}
-        pageId={page.id}
-        pageSlug={page.slug}
-        canEdit={viewer.canEdit}
-        isOwner={viewer.isOwner}
-      />
+      <div className="flex flex-col gap-10">
+        <PageTabs slug={page.slug} current={tab} counts={counts} saved={saved} />
 
-      {!empty && (
-        <>
+        {tab === "new" && (
           <WhatsNew
             updates={updates}
             createdLine={creationLine(
@@ -144,9 +162,19 @@ export default async function LivingPage({ params }: { params: Promise<{ slug: s
               initialSourceCount(evidence.map((e) => e.id), updates)
             )}
           />
-          <PageSources evidence={evidence} />
-        </>
-      )}
+        )}
+        {(tab === "papers" || tab === "datasets" || tab === "other") && <PageSources evidence={evidence} tab={tab} />}
+        {tab === "background" && (
+          <PageNotes
+            notes={notes}
+            evidence={evidence}
+            pageId={page.id}
+            pageSlug={page.slug}
+            canEdit={viewer.canEdit}
+            isOwner={viewer.isOwner}
+          />
+        )}
+      </div>
     </div>
   );
 }

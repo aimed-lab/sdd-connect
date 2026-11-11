@@ -9,6 +9,7 @@
 import { useState } from "react";
 import SectionHeading from "@/components/explore/SectionHeading";
 import { ApprovalTile, GrantTile, ResultTile, TILE_GRID, TrialTile } from "@/components/explore/ResultTiles";
+import { sourceAnchor } from "@/lib/server/pages/pageViewHelpers";
 import type { ExploreSection } from "@/types/explore";
 
 const SECTION_TITLE: Record<string, string> = {
@@ -38,24 +39,39 @@ function Grid({
   section,
   projectId,
   hideSave,
+  anchors,
 }: {
   section: ExploreSection;
   projectId?: string;
   hideSave?: boolean;
+  anchors?: boolean;
 }) {
   return (
     <div className={TILE_GRID}>
-      {section.items.map((item) =>
-        item.kind === "trial" ? (
-          <TrialTile key={item.id} item={item} projectId={projectId} hideSave={hideSave} />
-        ) : item.kind === "approval" ? (
-          <ApprovalTile key={item.id} item={item} projectId={projectId} hideSave={hideSave} />
-        ) : item.kind === "grant" ? (
-          <GrantTile key={item.id} item={item} projectId={projectId} hideSave={hideSave} />
+      {section.items.map((item) => {
+        const tile =
+          item.kind === "trial" ? (
+            <TrialTile key={item.id} item={item} projectId={projectId} hideSave={hideSave} />
+          ) : item.kind === "approval" ? (
+            <ApprovalTile key={item.id} item={item} projectId={projectId} hideSave={hideSave} />
+          ) : item.kind === "grant" ? (
+            <GrantTile key={item.id} item={item} projectId={projectId} hideSave={hideSave} />
+          ) : (
+            <ResultTile key={item.id} item={item} projectId={projectId} hideSave={hideSave} />
+          );
+        // The wrapper only exists with `anchors` (wiki pages), so Explore's own markup is unchanged.
+        return anchors ? (
+          <div
+            key={item.id}
+            id={sourceAnchor(item.id)}
+            className="min-w-0 scroll-mt-24 rounded-2xl target:ring-2 target:ring-primary target:ring-offset-2"
+          >
+            {tile}
+          </div>
         ) : (
-          <ResultTile key={item.id} item={item} projectId={projectId} hideSave={hideSave} />
-        )
-      )}
+          tile
+        );
+      })}
     </div>
   );
 }
@@ -65,6 +81,8 @@ export default function OtherSections({
   projectId,
   expandGenesets = false,
   hideSave = false,
+  hideHeadings = false,
+  anchors = false,
 }: {
   sections: ExploreSection[];
   projectId?: string;
@@ -72,6 +90,11 @@ export default function OtherSections({
   expandGenesets?: boolean;
   /** Leave out the bookmark on every tile. */
   hideSave?: boolean;
+  /** Leave out each section's own heading (the caller shows one). */
+  hideHeadings?: boolean;
+  /** Give every tile an id (sourceAnchor) so a link can scroll to it and it is
+   *  marked when it is the link's target. Used by wiki pages only. */
+  anchors?: boolean;
 }) {
   const [showGenesets, setShowGenesets] = useState(false);
   const withItems = sections.filter((s) => s.items.length > 0);
@@ -83,11 +106,13 @@ export default function OtherSections({
     <>
       {normal.map((section) => (
         <section key={section.tool}>
-          <SectionHeading
-            title={sectionTitle(section.kind)}
-            subtitle={section.kind === "target" ? TARGET_NOTE : undefined}
-          />
-          <Grid section={section} projectId={projectId} hideSave={hideSave} />
+          {!hideHeadings && (
+            <SectionHeading
+              title={sectionTitle(section.kind)}
+              subtitle={section.kind === "target" ? TARGET_NOTE : undefined}
+            />
+          )}
+          <Grid section={section} projectId={projectId} hideSave={hideSave} anchors={anchors} />
         </section>
       ))}
 
@@ -97,7 +122,7 @@ export default function OtherSections({
             <>
               <SectionHeading title="Gene sets" />
               {genesets.map((s) => (
-                <Grid key={s.tool} section={s} projectId={projectId} hideSave={hideSave} />
+                <Grid key={s.tool} section={s} projectId={projectId} hideSave={hideSave} anchors={anchors} />
               ))}
             </>
           ) : (
