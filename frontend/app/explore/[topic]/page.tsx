@@ -1,7 +1,7 @@
 "use client";
 
 // Search results page — /explore/<topic>. The question box (prefilled), the
-// assistant's short cited Answer with the quick facts under it, one tab row with
+// assistant's short cited AI summary with the quick facts under it, one tab row with
 // counts (All, Papers, Trials, FDA, Compounds, Datasets, Grants, plus any other
 // kind that has results), and a right sidebar of next steps. It POSTs
 // { input: topic } to the explore backend and renders the routed sections.
@@ -498,8 +498,9 @@ function SearchResults() {
 
       <div className="mt-8 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_20rem] gap-8 items-start">
         <div className="min-w-0 flex flex-col gap-6">
-          {!loading && !showError && !scoped && (
-            <AnswerCard topic={topic} sections={sections} onOpenTab={(kind) => select(tabs.some((t) => t.key === kind) ? kind : null)} />
+          {/* Shown while searching too, so it can say what is still running. */}
+          {!showError && !scoped && (
+            <AnswerCard topic={topic} sections={sections} searching={loading} onOpenTab={(kind) => select(tabs.some((t) => t.key === kind) ? kind : null)} />
           )}
 
           {/* One tab row with counts, replacing the category chips. */}

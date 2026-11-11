@@ -1,7 +1,7 @@
 "use client";
 
 // The right-hand column of /explore/<topic> (below the results on a phone):
-// keep this up to date (starts the assistant's usual save flow, with its
+// follow this topic (starts the assistant's usual wiki-page save flow, with its
 // confirm step), ask a follow-up (two suggestions that open the assistant), and
 // people on this (the best matching community, or nothing).
 
@@ -113,21 +113,37 @@ function PeopleOnThis({ topic }: { topic: string }) {
   );
 }
 
+const FOLLOW_POINTS = [
+  "Starts with the results on this page",
+  "Private to you until you share it",
+  "You can add your own notes",
+];
+
 export default function ResultsSidebar({ topic, sections }: { topic: string; sections: ExploreSection[] }) {
   const questions = followUpsFor(sections, topic).slice(0, 2);
 
   return (
     <aside className="flex flex-col gap-4 min-w-0" aria-label="Next steps">
-      <Card title="Keep this up to date">
-        <p className="font-body-sm text-body-sm text-secondary">
-          A wiki page collects new papers and trials on this topic every day.
+      <Card title="Follow this topic">
+        <p className="font-body-sm text-body-sm text-secondary break-words">
+          Get your own page on {topic}. New papers, trials and approvals are added to it every day.
         </p>
+        <ul className="flex flex-col gap-1 font-body-sm text-body-sm text-on-background">
+          {FOLLOW_POINTS.map((point) => (
+            <li key={point} className="flex items-start gap-2">
+              <span aria-hidden="true" className="w-4 shrink-0 text-center font-semibold text-primary">
+                ✓
+              </span>
+              <span>{point}</span>
+            </li>
+          ))}
+        </ul>
         <button
           type="button"
-          onClick={() => openAssistant({ text: saveAsLivingPageMessage(topic), mode: "send" })}
+          onClick={() => openAssistant({ text: saveAsLivingPageMessage(topic), mode: "send", stay: true })}
           className="btn-primary self-start px-4 py-2 rounded-lg font-label-md text-label-md"
         >
-          Save as wiki page
+          Follow this topic
         </button>
       </Card>
 

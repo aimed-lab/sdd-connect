@@ -1,17 +1,27 @@
 "use client";
 
-// The "Answer" card at the top of /explore/<topic>: the assistant's short,
+// The "AI summary" card at the top of /explore/<topic>: the assistant's short,
 // cited answer for the topic (the same /api/assistant call and the same answer
-// rendering the side panel uses; signed-in people only), with the quick-facts row under it. While the
-// answer loads a placeholder shows; if the call fails the card is hidden and the
-// results below are untouched. The quick facts come from the results already on
-// the page and link to the matching tab.
+// rendering the side panel uses; signed-in people only), with the quick-facts row
+// under it. The quick facts come from the results already on the page and link to
+// the matching tab.
+//
+// The card reports only what the page really has:
+//   - `searching` (the page's own search is still running): "Searching ...".
+//     The summary is not requested yet; it is requested once the lists are in.
+//   - lists in, summary not yet: one ticked line per result tab that has results,
+//     with that tab's count, then "Writing the summary".
+//   - summary in: the summary and its sources.
+//   - the summary call failed: one plain sentence. (/api/assistant is capped at
+//     60 seconds on the server, so the wait ends.)
+// Signed out, the card stays hidden, as before; the results are untouched.
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Markdown } from "@/components/explore/AssistantChat";
 import { parseAssistantReply } from "@/lib/server/assistant/assistantReply";
 import { quickFacts, sourcesToCards, stripChoiceText, type ResultCard } from "@/lib/server/assistant/assistantAnswer";
+import { resultTabs } from "@/lib/server/explore/exploreLayout";
 import type { ExploreSection } from "@/types/explore";
 
 type State =
@@ -19,13 +29,28 @@ type State =
   | { kind: "ok"; text: string; cards: ResultCard[] }
   | { kind: "failed" };
 
+// A small ring that turns; it stays still when the visitor asks for reduced motion.
+function Spinner() {
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-block h-4 w-4 shrink-0 rounded-full border-2 border-outline-variant/60 border-t-primary motion-safe:animate-spin"
+    />
+  );
+}
+
 export default function AnswerCard({
   topic,
   sections,
+  searching = false,
   onOpenTab,
 }: {
   topic: string;
   sections: ExploreSection[];
+  /** True while the page's search is still running: `sections` is not this
+   *  topic's results yet, so no counts or facts are shown and the summary is
+   *  not requested. */
+  searching?: boolean;
   /** Opens the results tab for a quick-fact row's kind. */
   onOpenTab: (kind: string) => void;
 }) {
@@ -38,6 +63,11 @@ export default function AnswerCard({
     // out, the card stays hidden and the search results below are untouched.
     if (!user) {
       setState({ kind: "failed" });
+      return;
+    }
+    // Wait for the lists, as before: the summary is requested once they are in.
+    if (searching) {
+      setState({ kind: "loading" });
       return;
     }
     const ctl = new AbortController();
@@ -62,22 +92,56 @@ export default function AnswerCard({
       }
     })();
     return () => ctl.abort();
-  }, [topic, user, authLoading]);
+  }, [topic, user, authLoading, searching]);
 
-  const facts = quickFacts(sections, topic);
+  const showCard = !authLoading && !!user && !!topic.trim();
+  const facts = searching ? [] : quickFacts(sections, topic);
+  // The same labels and counts as the tab row below, for tabs that have results.
+  const found = searching ? [] : resultTabs(sections).filter((t) => t.key !== "all" && t.count > 0);
 
   return (
     <div className="flex flex-col gap-4">
-      {state.kind !== "failed" && (
-        <section aria-label="Answer" className="rounded-2xl bg-white border border-outline-variant/30 p-6 flex flex-col gap-3">
-          <span className="font-label-sm text-[11px] tracking-[0.12em] uppercase text-secondary">Answer</span>
-          {state.kind === "loading" ? (
-            <div className="flex flex-col gap-2 animate-pulse" role="status" aria-label="Writing the answer">
-              <div className="h-3 rounded bg-surface-container-low w-11/12" />
-              <div className="h-3 rounded bg-surface-container-low w-10/12" />
-              <div className="h-3 rounded bg-surface-container-low w-7/12" />
-            </div>
-          ) : (
+      {showCard && (
+        <section aria-label="AI summary" className="rounded-2xl bg-white border border-outline-variant/30 p-6 flex flex-col gap-3">
+          <span className="font-label-sm text-[11px] tracking-[0.12em] uppercase text-secondary">AI summary</span>
+
+          {/* Always here, so a screen reader hears each change of status. */}
+          <div role="status" aria-live="polite" className="font-body-md text-body-md text-on-background">
+            {searching ? (
+              <p className="flex items-center gap-2">
+                <Spinner />
+                Searching papers, trials and approvals
+              </p>
+            ) : state.kind === "loading" ? (
+              <div className="flex flex-col gap-2">
+                <ul className="flex flex-col gap-1">
+                  {found.map((t) => (
+                    <li key={t.key} className="flex items-center gap-2">
+                      <span aria-hidden="true" className="w-4 shrink-0 text-center font-semibold text-primary">
+                        ✓
+                      </span>
+                      <span>
+                        {t.label} <span className="text-secondary">{t.count} found</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="flex items-center gap-2">
+                  <Spinner />
+                  Writing the summary
+                </p>
+                <p className="font-body-sm text-body-sm text-secondary">
+                  The lists below are ready now. You can start reading while the summary finishes.
+                </p>
+              </div>
+            ) : state.kind === "failed" ? (
+              <p>The summary could not be written. The results below are still complete.</p>
+            ) : (
+              <span className="sr-only">The summary is ready.</span>
+            )}
+          </div>
+
+          {!searching && state.kind === "ok" && (
             <>
               <div className="font-body-md text-body-md text-on-background leading-relaxed">
                 <Markdown text={state.text} maxCite={state.cards.length} />

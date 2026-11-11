@@ -12,6 +12,7 @@ import {
   namedCompounds,
   quickFacts,
   resolveTopic,
+  shouldMovePage,
   shouldShowPicker,
   sourcesToCards,
   topicTerms,
@@ -48,6 +49,34 @@ test("topicFromMessage: the subject of a search request, lead-ins removed", () =
   assert.equal(topicFromMessage("I work on EGFR resistance in lung cancer"), "EGFR resistance in lung cancer");
   assert.equal(topicFromMessage("PHGDH in Alzheimer's"), "PHGDH in Alzheimer's");
   assert.equal(topicFromMessage("Show clinical trials on EGFR"), "EGFR");
+});
+
+test("topicFromMessage: a page request's topic is the topic, never the whole sentence", () => {
+  assert.equal(topicFromMessage("I'd like to create a wiki page on PHGDH inhibitors"), "PHGDH inhibitors");
+  assert.equal(topicFromMessage("I would like to make a page about KRAS G12C"), "KRAS G12C");
+  assert.equal(topicFromMessage("I want to create a wiki page on EGFR"), "EGFR");
+  assert.equal(topicFromMessage("Create a wiki page on KRAS"), "KRAS");
+});
+
+test("a Follow click (stay) never moves the page and never turns the sentence into a search", () => {
+  const content = "I'd like to create a wiki page on PHGDH inhibitors";
+  // No search ran: there is no topic at all (so no panel search on the sentence).
+  assert.equal(resolveTopic({ content, backendQuery: null, stay: true }), null);
+  assert.equal(resolveTopic({ content, backendQuery: "  ", stay: true }), null);
+  // The backend searched, in its own words: that is the panel's topic, but the page stays.
+  const topic = resolveTopic({ content, backendQuery: "PHGDH inhibitor", stay: true });
+  assert.equal(topic, "PHGDH inhibitor");
+  assert.equal(shouldMovePage({ topic, current: "PHGDH inhibitors", onTeam: false, stay: true }), false);
+  // The same reply without stay does move the page (an ordinary question).
+  assert.equal(shouldMovePage({ topic, current: "PHGDH inhibitors", onTeam: false }), true);
+});
+
+test("shouldMovePage: only to a different topic, and never from a team page", () => {
+  assert.equal(shouldMovePage({ topic: "KRAS", current: "", onTeam: false }), true);
+  assert.equal(shouldMovePage({ topic: "kras", current: "KRAS", onTeam: false }), false);
+  assert.equal(shouldMovePage({ topic: "KRAS", current: "EGFR", onTeam: true }), false);
+  assert.equal(shouldMovePage({ topic: null, current: "EGFR", onTeam: false }), false);
+  assert.equal(shouldMovePage({ topic: "  ", current: "EGFR", onTeam: false }), false);
 });
 
 test("topicFromMessage: picks, small talk and a topic-less page request are not searches", () => {
