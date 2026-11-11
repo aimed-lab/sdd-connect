@@ -2,7 +2,8 @@
 // conference app: one centered column (about 720px) with a quiet top row ("Welcome, <name>"
 // and "← My projects"), the green hero (label, ★ Finalist, title, avatars), a thin row
 // "⌂ Project home" with the next key date, and then either the HOME (a green call-to-action
-// banner for finalists, six icon tiles, a Progress card, the latest announcements) or ONE
+// banner for finalists, six icon tiles each with a status line, a Progress card, the latest
+// announcements, "More you can do here") or ONE
 // VIEW (Tasks, Files, Announcements, Team, Timeline, Manage) with its title and content.
 // A footer card is on every screen. Server-safe.
 
@@ -19,6 +20,7 @@ import {
 } from "@/components/communities/CommunityIcons";
 import { COLABOFEST_CONTACT_EMAIL, COLABOFEST_STAGES, FINALIST_DUE } from "@/lib/colabofestConfig";
 import { initials, shortDate } from "@/lib/server/communityHome/communityHome";
+import { MORE_LINKS, tileStatusLines } from "@/lib/server/projectWorkspace/cfHome";
 import { ctaBanner, timelineState } from "@/lib/server/projectWorkspace/cfTasks";
 import type { ProjectView } from "@/lib/server/projectWorkspace/finalistTasks";
 import LinkedText from "./LinkedText";
@@ -45,6 +47,24 @@ const SECTION_TITLE_SHORT: Record<ProjectView, string> = {
 const TILE =
   "relative text-center min-w-0 flex flex-col items-center basis-[calc((100%-20px)/3)] grow-0 shrink-0 rounded-2xl bg-white px-1.5 pt-4 pb-3.5 " +
   "transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2";
+
+// The tinted square behind each tile's icon. Manage stays neutral.
+const TILE_TINT: Record<ProjectView, string> = {
+  tasks: "bg-[#e4efe7] text-[#1A5632]",
+  files: "bg-[#e3ecf8] text-[#1d4f91]",
+  announcements: "bg-[#f8ecd6] text-[#8a4a00]",
+  team: "bg-[#ece6f5] text-[#5b3a8c]",
+  timeline: "bg-[#dff0ef] text-[#0f5c5c]",
+  manage: "bg-surface-container-low text-primary",
+};
+
+// The "More you can do here" icons: same tints as the tiles.
+const MORE_TINT: Record<(typeof MORE_LINKS)[number]["tint"], string> = {
+  green: "bg-[#e4efe7] text-[#1A5632]",
+  purple: "bg-[#ece6f5] text-[#5b3a8c]",
+  blue: "bg-[#e3ecf8] text-[#1d4f91]",
+  amber: "bg-[#f8ecd6] text-[#8a4a00]",
+};
 
 type Tile = { key: ProjectView; label: string; badge?: string | null; icon: React.ReactNode; dashed?: boolean };
 
@@ -113,6 +133,18 @@ export default function ColabofestProject({
   tiles.push({ key: "team", label: "Team", icon: <IconUsers /> });
   tiles.push({ key: "timeline", label: "Timeline", icon: <IconClock /> });
   if (showManage) tiles.push({ key: "manage", label: "Manage", icon: <IconSettings />, dashed: true });
+
+  const status = tileStatusLines({
+    finalist,
+    finalistDone,
+    finalistTotal,
+    tasksDone: progress.done,
+    tasksTotal: progress.total,
+    hasFolder: !!sharedFolderUrl,
+    announcementsNew,
+    memberCount,
+    nextDateShown: nextDate?.shown ?? null,
+  });
 
   // Same source as the home hero label ("ColaboFest 2026 · C-108"): the project code is its C-### part.
   const projectCode = label?.match(/\bC-\d+\b/)?.[0] ?? null;
@@ -212,10 +244,11 @@ export default function ColabofestProject({
                 {t.badge && (
                   <span className="absolute top-2.5 right-2.5 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-bold leading-[14px] text-on-primary">{t.badge}</span>
                 )}
-                <span className="grid place-items-center shrink-0 w-[46px] h-[46px] rounded-[13px] bg-surface-container-low text-primary mb-2" aria-hidden>
+                <span className={`grid place-items-center shrink-0 w-11 h-11 rounded-xl ${TILE_TINT[t.key]} mb-2`} aria-hidden>
                   {t.icon}
                 </span>
                 <span className="block text-[13.5px] leading-[18px] font-bold text-on-background">{t.label}</span>
+                {status[t.key] && <span className="block mt-0.5 text-[13px] leading-[18px] text-secondary">{status[t.key]}</span>}
               </Link>
             ))}
           </nav>
@@ -265,6 +298,30 @@ export default function ColabofestProject({
                 ))}
               </ul>
             )}
+          </section>
+
+          <section className="flex flex-col gap-2.5 min-w-0" aria-labelledby="cf-more">
+            <h2 id="cf-more" className="font-title text-[18px] leading-6 text-on-background">
+              More you can do here
+            </h2>
+            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {MORE_LINKS.map((m) => (
+                <li key={m.href} className="min-w-0">
+                  <Link
+                    href={m.href}
+                    className="h-full flex items-start gap-3 rounded-2xl border border-[#e8e4da] bg-white px-4 py-3.5 transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+                  >
+                    <span className={`material-symbols-outlined grid place-items-center shrink-0 w-9 h-9 rounded-[10px] text-[20px] ${MORE_TINT[m.tint]}`} aria-hidden>
+                      {m.icon}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block font-label-md text-label-md text-on-background">{m.title}</span>
+                      <span className="block text-[13px] leading-5 text-secondary">{m.text}</span>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
           </section>
         </>
       )}
