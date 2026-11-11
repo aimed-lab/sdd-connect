@@ -22,11 +22,17 @@ module skips project_agent.py's step 2 (relevance ranking for a save-review
 list) and step 3 (checklist proposal) entirely — a wiki page only needs the
 candidate pool for wiki-note-writing and evidence-filing, both of which
 operate on the full candidate list, not a ranked top-8.
+
+TOPIC GATE. What there is instead is a plain on-topic check (apply_topic_gate,
+below): both the first build and every refresh drop candidates that don't
+name the page's gene/drug, disease or topic, before anything is written or
+filed. Its counts come back as `topic_gate` / `gate_kept` / `gate_dropped`.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 
 from tools.explore import explore_async
 from tools.abstracts import enrich_abstracts
@@ -114,6 +120,186 @@ def _flatten_candidates(explore_result: dict, max_candidates: int = 0) -> tuple[
     return items, failed, timed_out, len(seen)
 
 
+# ── Topic gate ──────────────────────────────────────────────────────────────
+# The sources match loosely: PubMed splits "ovarian cancer" into "ovarian" AND
+# "cancer" anywhere in the record, and ClinicalTrials.gov's condition search
+# also matches a trial's keywords. Without a check, a breast cancer paper that
+# mentions "ovarian function suppression", a polycystic ovarian syndrome trial
+# and a urothelial basket trial all landed on an "Ovarian Cancer" page. This
+# gate keeps an item only when it is plainly about the page's topic, judged
+# against the scope explore_async already extracted (no extra LLM call, no
+# extra request).
+#
+# Only scope terms that literally appear in the page's topic text are trusted
+# (see gate_terms); then, most specific level first (the first level with such
+# a term is used; with none, the scope's disease terms as extracted):
+#   1. "entity": scope genes + assets (gene / target / drug / compound). The
+#      term must appear as a whole word in the title or the summary.
+#   2. "disease": scope diseases. Every word of the term in the TITLE (light
+#      stemming, see _stem), or the exact phrase in the summary, or (trials)
+#      every word in one entry of the trial's own conditions list when the
+#      item carries one (raw["conditions"]; keywords never count).
+#   3. "topic": scope topics, judged with the disease rule.
+#   No term at any level: no gate, everything is kept (as before the gate).
+# Several terms at the chosen level: matching any one passes. With a gate on,
+# an item with neither a title nor a summary is dropped.
+
+_GATE_LEVELS = (("entity", ("genes", "assets")), ("disease", ("diseases",)), ("topic", ("topics",)))
+
+# A run that had at least this many candidates and kept none is logged as a
+# WARNING: the extracted terms are more likely wrong than the whole pool.
+GATE_ALL_DROPPED_WARN_AT = 10
+
+_CANCER_WORDS = {
+    "cancer", "cancers", "carcinoma", "carcinomas", "tumor", "tumors", "tumour",
+    "tumours", "neoplasm", "neoplasms",
+}
+# Words inside a disease term that carry no meaning of their own.
+_FILLER_WORDS = {"of", "the", "and", "in", "with", "a", "an", "or", "for", "to"}
+_WORD_RE = re.compile(r"[a-z0-9]+")
+_EDGE_L = r"(?<![A-Za-z0-9])"
+_EDGE_R = r"(?![A-Za-z0-9])"
+
+
+def _stem(word: str) -> str:
+    """Light stemming for the disease rule: the cancer synonyms count as one
+    word, ovary / ovarian / ovaries as one, and a plain plural "s" is dropped."""
+    if word in _CANCER_WORDS:
+        return "cancer"
+    if word.startswith("ovar"):
+        return "ovar"
+    if len(word) > 4 and word.endswith("s") and not word.endswith("ss"):
+        return word[:-1]
+    return word
+
+
+def _stems(text: str) -> set[str]:
+    return {_stem(w) for w in _WORD_RE.findall((text or "").lower())}
+
+
+def _term_words(term: str) -> set[str]:
+    return {_stem(w) for w in _WORD_RE.findall(term.lower()) if w not in _FILLER_WORDS}
+
+
+def _phrase_pattern(term: str, plural: bool) -> str:
+    body = r"\s+".join(re.escape(p) for p in term.split())
+    return _EDGE_L + body + (r"s?" if plural else "") + _EDGE_R
+
+
+def _whole_word(term: str, text: str) -> bool:
+    """`term` as a whole word (or phrase), case-insensitive. Edge lookarounds
+    rather than \\b so "KRAS G12C" or "5-FU" still match cleanly."""
+    return re.search(_phrase_pattern(term, False), text or "", re.IGNORECASE) is not None
+
+
+def _exact_phrase(term: str, text: str) -> bool:
+    """The phrase itself, whitespace-tolerant, a plural "s" allowed at the end."""
+    return re.search(_phrase_pattern(term, True), text or "", re.IGNORECASE) is not None
+
+
+def _trial_conditions(item: dict) -> list[str]:
+    raw = item.get("raw") if isinstance(item.get("raw"), dict) else {}
+    conds = raw.get("conditions") or item.get("conditions") or []
+    return [c for c in conds if isinstance(c, str)] if isinstance(conds, list) else []
+
+
+def _plain_words(text: str) -> list[str]:
+    """Lower-cased words with a plain plural "s" dropped, for the topic-text check."""
+    out = []
+    for w in _WORD_RE.findall((text or "").lower()):
+        out.append(w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w)
+    return out
+
+
+def _in_topic_text(term: str, topic: str) -> bool:
+    """Does `term` literally appear in the page's topic text? Case-insensitive,
+    plural "s" ignored, words contiguous and in order."""
+    tw, pw = _plain_words(term), _plain_words(topic)
+    if not tw:
+        return False
+    return any(pw[i:i + len(tw)] == tw for i in range(len(pw) - len(tw) + 1))
+
+
+def _level_terms(scope: dict, level: str, keys: tuple[str, ...]) -> list[str]:
+    terms: list[str] = []
+    seen: set[str] = set()
+    for key in keys:
+        for t in scope.get(key) or []:
+            t = t.strip() if isinstance(t, str) else ""
+            if t and t.lower() not in seen and (level == "entity" or _term_words(t)):
+                seen.add(t.lower())
+                terms.append(t)
+    return terms
+
+
+def gate_terms(scope: dict | None, topic: str) -> tuple[str | None, list[str], list[str]]:
+    """(level, terms, ignored) the gate checks; (None, [], ignored) for no gate.
+
+    The scope comes from an LLM extraction, which can add terms the person
+    never typed (a gene like BRCA1 for an "Ovarian Cancer" page, which would
+    then gate on BRCA1). So at each level only terms that literally appear in
+    the page's topic text are trusted, most specific level first. When no
+    level has such a term but the scope has disease terms, those are used as
+    extracted (the extraction may have normalised the wording, e.g. "NSCLC"
+    -> "non-small cell lung cancer"). `ignored` is every scope term left out
+    for not being in the topic text."""
+    scope = scope or {}
+    by_level = [(level, _level_terms(scope, level, keys)) for level, keys in _GATE_LEVELS]
+    ignored = [t for _, terms in by_level for t in terms if not _in_topic_text(t, topic)]
+    for level, terms in by_level:
+        literal = [t for t in terms if _in_topic_text(t, topic)]
+        if literal:
+            return level, literal, ignored
+    diseases = dict(by_level)["disease"]
+    if diseases:
+        return "disease", diseases, [t for t in ignored if t not in diseases]
+    return None, [], ignored
+
+
+def item_on_topic(item: dict, level: str, terms: list[str]) -> bool:
+    """Does this item pass the gate for (level, terms)? See the block comment."""
+    title = (item.get("title") or "").strip()
+    summary = (item.get("summary") or "").strip()
+    if not title and not summary:
+        return False
+    if level == "entity":
+        return any(_whole_word(t, title) or _whole_word(t, summary) for t in terms)
+    title_stems = _stems(title)
+    conditions = _trial_conditions(item) if item.get("kind") == "trial" else []
+    for t in terms:
+        words = _term_words(t)
+        if words <= title_stems or _exact_phrase(t, summary):
+            return True
+        if any(words <= _stems(c) for c in conditions):
+            return True
+    return False
+
+
+def apply_topic_gate(topic: str, scope: dict | None, items: list[dict], run: str) -> tuple[list[dict], dict]:
+    """Keep the on-topic items, order kept. Logs one line per run and returns
+    (kept_items, report), report = {level, terms, ignored_terms, candidates,
+    kept, dropped}."""
+    level, terms, ignored = gate_terms(scope, topic)
+    kept = list(items) if level is None else [i for i in items if item_on_topic(i, level, terms)]
+    report = {
+        "level": level,
+        "terms": terms,
+        "ignored_terms": ignored,
+        "candidates": len(items),
+        "kept": len(kept),
+        "dropped": len(items) - len(kept),
+    }
+    msg = ("%s topic gate: topic=%r level=%s terms=%r ignored_not_in_topic=%r "
+           "candidates=%d kept=%d dropped=%d")
+    args = (run, topic, level or "none", terms, ignored,
+            report["candidates"], report["kept"], report["dropped"])
+    if level is not None and not kept and len(items) >= GATE_ALL_DROPPED_WARN_AT:
+        logger.warning(msg + " (dropped everything; the terms may be wrong)", *args)
+    else:
+        logger.info(msg, *args)
+    return kept, report
+
+
 async def run_page_agent_async(topic: str) -> dict:
     """Run the page pipeline for one bare topic string. Mirrors
     run_project_agent_async's own WIKI NOTES + EVIDENCE FILING stages
@@ -176,6 +362,10 @@ async def run_page_agent_async(topic: str) -> dict:
     # Fill in missing abstracts first (best-effort, never raises).
     enrichment = await enrich_abstracts(candidates) if candidates else None
 
+    # Off-topic items never become page sources or citations: gate the pool
+    # before notes are written, with the abstracts just filled in.
+    candidates, topic_gate = apply_topic_gate(topic, explore_result.get("scope"), candidates, "page_agent")
+
     # Numbered-citation note writing (tools/page_notes.py): the model only sees
     # evidence with a title + abstract, cites it as [n], and a code check
     # strips any [n] it wasn't given and drops notes left uncited. Evidence
@@ -221,6 +411,9 @@ async def run_page_agent_async(topic: str) -> dict:
         "enrichment": enrichment,
         "candidates_in_pool": len(candidates),
         "citation_report": citation_report,
+        "topic_gate": topic_gate,
+        "gate_kept": topic_gate["kept"],
+        "gate_dropped": topic_gate["dropped"],
         "warnings": warnings,
         "search_failed": search_failed,
     }
@@ -240,8 +433,9 @@ async def run_page_refresh_async(topic: str, known_item_ids: list[str], notes: l
     search comes back as search_failed=True with no items.
 
     Returns {new_items, evidence_filings, unfiled_items, project_level_items,
-    missing_note_suggestions, candidates_found, tools_called, warnings,
-    search_failed}; new_items are curated (curate_evidence_item shape)."""
+    missing_note_suggestions, candidates_found, tools_called, topic_gate,
+    gate_kept, gate_dropped, warnings, search_failed}; new_items are curated
+    (curate_evidence_item shape) and have passed the topic gate."""
     warnings: list[str] = []
     try:
         explore_result = await explore_async(_page_goal_text(topic))
@@ -266,6 +460,9 @@ async def run_page_refresh_async(topic: str, known_item_ids: list[str], notes: l
     if fresh:
         await enrich_abstracts(fresh)  # best-effort, never raises
 
+    # Only on-topic items become new page sources (see apply_topic_gate).
+    fresh, topic_gate = apply_topic_gate(topic, explore_result.get("scope"), fresh, "page_refresh")
+
     usable_notes = [
         {"slug": n["slug"], "title": n.get("title") or "", "body": n.get("body") or ""}
         for n in (notes or [])
@@ -283,6 +480,9 @@ async def run_page_refresh_async(topic: str, known_item_ids: list[str], notes: l
         "missing_note_suggestions": suggest_missing_notes(unfiled_items),
         "candidates_found": candidates_found,
         "tools_called": explore_result.get("tools_called") or [],
+        "topic_gate": topic_gate,
+        "gate_kept": topic_gate["kept"],
+        "gate_dropped": topic_gate["dropped"],
         "warnings": warnings,
         "search_failed": search_failed,
     }
