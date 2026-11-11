@@ -898,7 +898,7 @@ export default function AssistantChat() {
         </button>
       )}
       {open && (
-        // z-40 sits under the nav (z-50) so its account menu always opens on top.
+        // z-40 sits under the nav (z-50), and under the side menu (z-70) it opens.
         <aside
           aria-label="AI assistant"
           style={{ "--assistant-panel-w": expanded ? "100vw" : `${width}px` } as CSSProperties}

@@ -33,13 +33,15 @@ test("/start redirects to /collaborate and its old pieces are gone", () => {
   assert.ok(!existsSync(new URL("../startRules.ts", import.meta.url)));
 });
 
-test("account menu: My teams first, no Getting started, desktop and mobile", () => {
-  const nav = read("components/Nav.tsx");
-  assert.ok(!nav.includes('href="/start"') && !nav.includes("Getting started"));
-  assert.equal(nav.split("My teams").length - 1, 2);
-  assert.ok(nav.indexOf('href="/teams"') < nav.indexOf('href="/projects"'));
-  assert.ok(nav.lastIndexOf('href="/teams"') < nav.lastIndexOf('href="/projects"'));
-  assert.ok(!nav.includes("Your teams"));
+// The account dropdown and the phone menu are now one side menu
+// (lib/server/nav/sideMenu.test.ts covers what it lists and in which order).
+test("header and side menu: one My teams link, no Getting started", () => {
+  const menu = read("lib/server/nav/sideMenu.ts");
+  assert.equal(menu.split('"My teams"').length - 1, 1);
+  for (const src of [read("components/Nav.tsx"), read("components/SideMenu.tsx"), menu]) {
+    assert.ok(!src.includes('"/start"') && !src.includes("Getting started"));
+    assert.ok(!src.includes("Your teams"));
+  }
 });
 
 test("Collaborate: three cards, communities only, old boxes gone", () => {
