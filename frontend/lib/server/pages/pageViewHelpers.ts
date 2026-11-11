@@ -255,6 +255,91 @@ export function groupEvidenceByKind(rows: EvidenceRow[]): ExploreSection[] {
     .map((kind) => ({ tool: `page-${kind}`, kind, items: byKind.get(kind) as ExploreItem[] }));
 }
 
+// ── tabs on a wiki page ──────────────────────────────────────────────────────
+// /pages/<slug>?tab=<key>. The page is rendered on the server one tab at a time.
+
+export const WIKI_TABS = [
+  { key: "new", label: "What's new" },
+  { key: "papers", label: "Papers" },
+  { key: "datasets", label: "Datasets" },
+  { key: "background", label: "Background" },
+  { key: "other", label: "More sources" },
+] as const;
+export type WikiTab = (typeof WIKI_TABS)[number]["key"];
+
+export function isWikiTab(v: unknown): v is WikiTab {
+  return WIKI_TABS.some((t) => t.key === v);
+}
+
+/** One plain sentence for a tab with nothing in it. Background keeps the
+ *  sections' own empty state (components/pages/PageNotes.tsx). */
+export const WIKI_TAB_EMPTY: Record<Exclude<WikiTab, "background">, string> = {
+  new: "Nothing new yet. New papers, trials and datasets are added about once a day.",
+  papers: "No papers collected yet.",
+  datasets: "No datasets found for this topic yet. Datasets come from GEO.",
+  other: "No other sources yet.",
+};
+
+/** The tab a collected item is shown on: papers and preprints on Papers,
+ *  datasets on Datasets, every other kind on More sources. */
+export function tabOfKind(kind: string): "papers" | "datasets" | "other" {
+  if (kind === "paper" || kind === "preprint") return "papers";
+  if (kind === "dataset") return "datasets";
+  return "other";
+}
+
+/** The collected items of each source tab, in the order they came. */
+export function splitEvidenceByTab<T extends { kind: string }>(rows: T[]): { papers: T[]; datasets: T[]; other: T[] } {
+  const out: { papers: T[]; datasets: T[]; other: T[] } = { papers: [], datasets: [], other: [] };
+  for (const row of rows) out[tabOfKind(row.kind)].push(row);
+  return out;
+}
+
+/** The number shown on each tab: timeline entries, items per source tab, sections. */
+export function wikiTabCounts(v: { updates: number; evidence: { kind: string }[]; notes: number }): Record<WikiTab, number> {
+  const split = splitEvidenceByTab(v.evidence);
+  return {
+    new: v.updates,
+    papers: split.papers.length,
+    datasets: split.datasets.length,
+    background: v.notes,
+    other: split.other.length,
+  };
+}
+
+/** Which tab the page shows. A valid ?tab= wins. Without one: the viewer's
+ *  saved choice (the wiki_tab cookie) when it is one of the tabs; else What's
+ *  new when it has at least one entry; else Background. */
+export function pickWikiTab(v: { param: unknown; saved: unknown; newCount: number }): WikiTab {
+  if (isWikiTab(v.param)) return v.param;
+  if (isWikiTab(v.saved)) return v.saved;
+  return v.newCount > 0 ? "new" : "background";
+}
+
+export function wikiTabHref(slug: string, tab: WikiTab): string {
+  return `/pages/${slug}?tab=${tab}`;
+}
+
+/** The cookie that remembers "Always open on": a year, the whole site, Lax. */
+export const WIKI_TAB_COOKIE = "wiki_tab";
+export const WIKI_TAB_COOKIE_MAX_AGE = 365 * 24 * 60 * 60;
+
+export function wikiTabCookie(tab: WikiTab): string {
+  return `${WIKI_TAB_COOKIE}=${tab}; Max-Age=${WIKI_TAB_COOKIE_MAX_AGE}; Path=/; SameSite=Lax`;
+}
+
+/** The id a collected item carries in the Papers, Datasets and More sources
+ *  lists, so a citation can scroll to it. Made from the item's source id (the
+ *  id the Explore lists get); anything but letters, digits, _ and - becomes -. */
+export function sourceAnchor(itemId: string): string {
+  return `src-${itemId.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+}
+
+/** Where a citation [n] goes: the tab that holds its source, scrolled to it. */
+export function citationHref(slug: string, item: { kind: string; item_id: string }): string {
+  return `${wikiTabHref(slug, tabOfKind(item.kind))}#${sourceAnchor(item.item_id)}`;
+}
+
 // ── my pages ─────────────────────────────────────────────────────────────────
 
 export const NEW_ITEMS_WINDOW_DAYS = 7;

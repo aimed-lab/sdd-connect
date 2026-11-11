@@ -5,6 +5,7 @@
 // icon on hover (always visible on phones). Thin dividers between rows.
 
 import SaveButton from "@/components/explore/SaveButton";
+import { sourceAnchor } from "@/lib/server/pages/pageViewHelpers";
 import { paperMeta, preprintMeta } from "@/lib/typeStyles";
 import type { ExploreItem } from "@/types/explore";
 
@@ -15,6 +16,7 @@ export default function PaperList({
   projectId,
   preprint = false,
   hideSave = false,
+  anchors = false,
 }: {
   items: ExploreItem[];
   /** All view: show at most this many, then a "More papers" link. */
@@ -27,6 +29,9 @@ export default function PaperList({
   preprint?: boolean;
   /** Leave out the bookmark icon on every row. */
   hideSave?: boolean;
+  /** Give every row an id (sourceAnchor) so a link can scroll to it and it is
+   *  marked when it is the link's target. Used by wiki pages only. */
+  anchors?: boolean;
 }) {
   if (items.length === 0) return null;
   const shown = limit ? items.slice(0, limit) : items;
@@ -46,7 +51,14 @@ export default function PaperList({
             </>
           );
           return (
-            <li key={item.id} className="group py-4 grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
+            <li
+              key={item.id}
+              id={anchors ? sourceAnchor(item.id) : undefined}
+              className={
+                "group py-4 grid grid-cols-[1fr_auto] gap-x-4 gap-y-1" +
+                (anchors ? " scroll-mt-24 target:bg-[#f3f1ea] target:px-3 target:rounded-lg" : "")
+              }
+            >
               <div className="min-w-0 col-start-1">
                 {item.url ? (
                   <a

@@ -1,11 +1,13 @@
-// The notes of a wiki page: each one a section (title + body). [n] in a body
-// is a numbered citation that links to the cited evidence; [[Note Title]]
-// links to another note on the page. A citation the page cannot resolve stays
-// plain text. Server component.
+// The sections of a wiki page (the Background tab): each one a title and a
+// body. [n] in a body is a numbered citation: it opens the tab that holds the
+// cited source (Papers, Datasets or More sources) and scrolls to it; the list
+// under the section links straight out to each source. [[Note Title]] links to
+// another section on the page. A citation the page cannot resolve stays plain
+// text. Server component.
 
 import SectionHeading from "@/components/explore/SectionHeading";
 import type { PageNoteView } from "@/lib/server/pages/pageView";
-import { parseNoteBody, type EvidenceRow } from "@/lib/server/pages/pageViewHelpers";
+import { citationHref, parseNoteBody, type EvidenceRow } from "@/lib/server/pages/pageViewHelpers";
 import { editedByLabel } from "@/lib/server/pages/pageEditCore";
 import AddSection from "./AddSection";
 import NoteSection from "./NoteSection";
@@ -27,13 +29,20 @@ export default function PageNotes({
   /** Only the owner may delete a section. */
   isOwner?: boolean;
 }) {
-  if (notes.length === 0 && !canEdit) return null;
+  if (notes.length === 0 && !canEdit) {
+    return (
+      <section>
+        <SectionHeading title="Background" />
+        <p className="font-body-md text-body-md text-secondary">No sections yet.</p>
+      </section>
+    );
+  }
   const evidenceById = new Map(evidence.map((e) => [e.id, e]));
   const slugByTitle = new Map(notes.map((n) => [n.title.toLowerCase(), n.slug]));
 
   return (
     <section>
-      <SectionHeading title="Notes" />
+      <SectionHeading title="Background" />
       <div className="flex flex-col gap-10 max-w-3xl">
         {notes.map((note) => {
           const citeMap = new Map(Object.entries(note.citations).map(([n, id]) => [Number(n), id]));
@@ -75,19 +84,18 @@ export default function PageNotes({
                         );
                       }
                       const item = evidenceById.get(part.itemId ?? "");
-                      return item?.url ? (
+                      // A plain <a>, not <Link>: a full load, so the browser scrolls to the source itself.
+                      return item ? (
                         <a
                           key={j}
-                          href={item.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                          href={citationHref(pageSlug, item)}
                           title={item.title}
                           className="align-super text-[11px] text-primary hover:underline"
                         >
                           [{part.n}]
                         </a>
                       ) : (
-                        <sup key={j} className="text-[11px] text-secondary" title={item?.title}>
+                        <sup key={j} className="text-[11px] text-secondary">
                           [{part.n}]
                         </sup>
                       );

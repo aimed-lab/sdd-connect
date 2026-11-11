@@ -5,7 +5,7 @@
 // with <N> sources". Server component (native <details>).
 
 import SectionHeading from "@/components/explore/SectionHeading";
-import { groupUpdatesByDate, type UpdateRow } from "@/lib/server/pages/pageViewHelpers";
+import { WIKI_TAB_EMPTY, groupUpdatesByDate, type UpdateRow } from "@/lib/server/pages/pageViewHelpers";
 
 export default function WhatsNew({ updates, createdLine }: { updates: UpdateRow[]; createdLine: string }) {
   const groups = groupUpdatesByDate(updates);
@@ -14,7 +14,7 @@ export default function WhatsNew({ updates, createdLine }: { updates: UpdateRow[
     <section>
       <SectionHeading title="What's new" subtitle="Resources added to this page, newest first." />
       {groups.length === 0 && (
-        <p className="mb-3 font-body-md text-body-md text-secondary">Nothing new since the page was created.</p>
+        <p className="mb-3 font-body-md text-body-md text-secondary">{WIKI_TAB_EMPTY.new}</p>
       )}
       <div className="divide-y divide-[#e7e4dc] border-y border-[#e7e4dc]">
         {groups.map((group, i) => (
