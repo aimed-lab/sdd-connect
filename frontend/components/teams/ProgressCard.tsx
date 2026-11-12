@@ -4,11 +4,15 @@
 // Done, Working on or Stuck. Any member posts; the author or a lead deletes.
 // An update is a tagged Team news row (lib/server/teams/teamRules.ts explains);
 // tagged rows are shown here and not under Team news.
+// Under each update: one level of replies (team_update_replies). "Reply" (or
+// the reply count) opens the list, oldest first, and a one-line box. Any member
+// replies; the author or a lead deletes. More than three replies show the
+// latest three and "Show all N replies".
 
 import { useState } from "react";
-import { deleteProgressAction, postProgressAction } from "@/app/teams/actions";
+import { deleteProgressAction, deleteReplyAction, postProgressAction, postReplyAction } from "@/app/teams/actions";
 import MoreMenu from "@/components/MoreMenu";
-import { initials, shortDate } from "@/lib/server/communityHome/communityHome";
+import { initials } from "@/lib/server/communityHome/communityHome";
 import {
   DEFAULT_PROGRESS_TAG,
   PROGRESS_TAGS,
@@ -18,6 +22,14 @@ import {
   shownProgress,
   type ProgressTag,
 } from "@/lib/server/teams/teamRules";
+import {
+  REPLY_TEXT_MAX,
+  canDeleteReply,
+  replyToggleLabel,
+  teamDay,
+  shownReplies,
+  type ReplyRow,
+} from "@/lib/server/teams/teamWorkRules";
 import { Card, Err, ROW, useDo } from "./TeamShelves";
 
 export type ProgressItem = { id: string; author_id: string; title: string; created_at: string; tag: ProgressTag };
@@ -33,6 +45,7 @@ export default function ProgressCard({
   teamId,
   slug,
   items,
+  replies,
   names,
   viewerId,
   isLead,
@@ -41,6 +54,8 @@ export default function ProgressCard({
   slug: string;
   /** Newest first. */
   items: ProgressItem[];
+  /** Update id -> its replies, oldest first (groupReplies). */
+  replies: Record<string, ReplyRow[]>;
   /** user id -> display name, for the people on the team now. */
   names: Record<string, string>;
   viewerId: string;
@@ -124,8 +139,10 @@ export default function ProgressCard({
               const name = names[u.author_id] ?? "Former member";
               return (
                 <li key={u.id} className={`${ROW} items-start ${busy === u.id ? "opacity-50" : ""}`}>
+                  {/* self-start: ROW's items-center wins over items-start in the
+                      CSS, so the avatar and ⋯ would centre on the whole thread. */}
                   <span
-                    className="w-9 h-9 shrink-0 rounded-full bg-surface-container-low text-primary flex items-center justify-center text-[12px] font-semibold"
+                    className="w-9 h-9 shrink-0 self-start rounded-full bg-surface-container-low text-primary flex items-center justify-center text-[12px] font-semibold"
                     aria-hidden
                   >
                     {initials(name)}
@@ -133,15 +150,24 @@ export default function ProgressCard({
                   <div className="min-w-0 flex-1 flex flex-col gap-1">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
                       <span className="font-label-lg text-[14.5px] leading-6 font-semibold text-on-background break-words min-w-0">{name}</span>
-                      <span className="text-[12.5px] leading-5 text-secondary">{shortDate(u.created_at)}</span>
+                      <span className="text-[12.5px] leading-5 text-secondary">{teamDay(u.created_at)}</span>
                     </div>
                     <span className={`self-start rounded-full px-2 py-0.5 text-[11.5px] font-semibold leading-4 ${CHIP[u.tag]}`}>{PROGRESS_TAG_LABEL[u.tag]}</span>
                     <p className="font-body-md text-[14px] leading-[1.5] text-on-background break-words">{u.title}</p>
+                    <ReplyThread
+                      teamId={teamId}
+                      slug={slug}
+                      updateId={u.id}
+                      replies={replies[u.id] ?? []}
+                      names={names}
+                      viewerId={viewerId}
+                      isLead={isLead}
+                    />
                   </div>
                   {canDeleteProgress({ isLead, authorId: u.author_id, viewerId }) && (
                     <MoreMenu
                       iconOnly
-                      className="shrink-0"
+                      className="shrink-0 self-start"
                       items={[
                         {
                           label: "Delete",
@@ -169,5 +195,145 @@ export default function ProgressCard({
         </>
       )}
     </Card>
+  );
+}
+
+// ── replies ─────────────────────────────────────────────────────────────────
+
+function ReplyThread({
+  teamId,
+  slug,
+  updateId,
+  replies,
+  names,
+  viewerId,
+  isLead,
+}: {
+  teamId: string;
+  slug: string;
+  updateId: string;
+  replies: ReplyRow[];
+  names: Record<string, string>;
+  viewerId: string;
+  isLead: boolean;
+}) {
+  const { busy, error, run } = useDo();
+  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [text, setText] = useState("");
+  const { shown, showAllLabel } = shownReplies(replies, expanded);
+  const posting = busy === "reply";
+  const inputId = `reply-${updateId}`;
+
+  const post = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!text.trim() || posting) return;
+    await run("reply", async () => {
+      const res = await postReplyAction(teamId, slug, updateId, text);
+      if (res.ok) setText("");
+      return res;
+    });
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-expanded={false}
+        className="self-start -ml-1 min-h-11 px-1 inline-flex items-center gap-1 text-[13px] font-semibold leading-5 text-primary hover:underline underline-offset-4"
+      >
+        <span className="material-symbols-outlined text-[16px]" aria-hidden>
+          chat_bubble
+        </span>
+        {replyToggleLabel(replies.length)}
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-1 flex flex-col gap-2 border-l-2 border-[#efece3] pl-3">
+      {showAllLabel && (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="self-start min-h-11 text-[13px] font-semibold leading-5 text-primary hover:underline underline-offset-4"
+        >
+          {showAllLabel}
+        </button>
+      )}
+      {shown.length > 0 && (
+        <ul className="flex flex-col gap-2.5">
+          {shown.map((r) => {
+            const name = names[r.author_id] ?? "Former member";
+            return (
+              <li key={r.id} className={`flex items-start gap-2.5 min-w-0 ${busy === r.id ? "opacity-50" : ""}`}>
+                <span
+                  className="w-7 h-7 shrink-0 rounded-full bg-surface-container-low text-primary flex items-center justify-center text-[11px] font-semibold"
+                  aria-hidden
+                >
+                  {initials(name)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-x-2 min-w-0">
+                    <span className="text-[13.5px] leading-5 font-semibold text-on-background break-words min-w-0">{name}</span>
+                    <span className="text-[12px] leading-5 text-secondary">{teamDay(r.created_at)}</span>
+                  </div>
+                  <p className="font-body-md text-[13.5px] leading-[1.5] text-on-background break-words">{r.body}</p>
+                </div>
+                {canDeleteReply({ isLead, authorId: r.author_id, viewerId }) && (
+                  <MoreMenu
+                    iconOnly
+                    className="shrink-0"
+                    buttonClassName="min-h-11 min-w-11 justify-center"
+                    items={[
+                      {
+                        label: "Delete reply",
+                        danger: true,
+                        onClick: () => {
+                          if (window.confirm("Delete this reply?")) void run(r.id, () => deleteReplyAction(teamId, slug, r.id));
+                        },
+                      },
+                    ]}
+                  />
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <form onSubmit={post} className="flex items-center gap-2 min-w-0">
+        <label htmlFor={inputId} className="sr-only">
+          Your reply
+        </label>
+        <input
+          id={inputId}
+          type="text"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          maxLength={REPLY_TEXT_MAX}
+          placeholder="Write a reply"
+          autoComplete="off"
+          autoFocus
+          className="min-w-0 flex-1 min-h-11 rounded-lg border border-[#d9d5c9] bg-white px-3 py-2 font-body-md text-[14px] leading-6 text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
+        />
+        <button
+          type="submit"
+          disabled={posting || !text.trim()}
+          className="btn-primary shrink-0 min-h-11 px-4 rounded-lg font-label-md text-label-md disabled:opacity-50"
+        >
+          {posting ? "Sending…" : "Reply"}
+        </button>
+      </form>
+      <button
+        type="button"
+        onClick={() => setOpen(false)}
+        aria-expanded={true}
+        className="self-start min-h-11 text-[13px] font-semibold leading-5 text-secondary hover:text-primary"
+      >
+        {replies.length > 0 ? "Hide replies" : "Cancel"}
+      </button>
+      <Err text={error} />
+    </div>
   );
 }

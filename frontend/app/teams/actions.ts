@@ -23,6 +23,14 @@ import {
   updateTeamDetails,
   type PageChoice,
 } from "@/lib/server/teams/teams";
+import {
+  addTeamTask,
+  deleteProgressReply,
+  deleteTeamTask,
+  postProgressReply,
+  updateTeamTask,
+  type TaskPatch,
+} from "@/lib/server/teams/teamWork";
 import { joinTeamByEmail } from "@/lib/server/communityJoin";
 import { headers } from "next/headers";
 import { EMAIL_JOINED_NOTE } from "@/lib/server/teams/teamRules";
@@ -37,10 +45,13 @@ function fail(e: unknown, what: string): { ok: false; error: string } {
   return { ok: false, error: "Something went wrong. Please try again." };
 }
 
-/** Create a team: name, optional emails. The creator becomes its lead. */
+/** Create a team: name, optional emails, optional "What will you work on?".
+ *  The creator becomes its lead. */
 export async function createTeamAction(input: {
   name: string;
   emails: string;
+  /** "What will you work on?" — optional; becomes the team description. */
+  focus?: string;
 }): Promise<{ ok: true; slug: string; added: number; problems: string[] } | { ok: false; error: string }> {
   try {
     const res = await createTeam(input);
@@ -189,6 +200,79 @@ export async function deleteProgressAction(teamId: string, slug: string, updateI
     return { ok: true };
   } catch (e) {
     return fail(e, "deleteProgressAction");
+  }
+}
+
+// ── replies on progress updates ─────────────────────────────────────────────
+
+/** Reply to a progress update (any team member). */
+export async function postReplyAction(teamId: string, slug: string, updateId: string, body: string): Promise<TeamActionResult> {
+  if (!teamId || !updateId) return { ok: false, error: "Missing update." };
+  try {
+    const res = await postProgressReply(teamId, updateId, body);
+    if (res.status !== "ok") return { ok: false, error: res.error };
+    revalidatePath(`/teams/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    return fail(e, "postReplyAction");
+  }
+}
+
+/** Delete a reply (its author or a lead). */
+export async function deleteReplyAction(teamId: string, slug: string, replyId: string): Promise<TeamActionResult> {
+  if (!teamId || !replyId) return { ok: false, error: "Missing reply." };
+  try {
+    const res = await deleteProgressReply(teamId, replyId);
+    if (res.status !== "ok") return { ok: false, error: res.error };
+    revalidatePath(`/teams/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    return fail(e, "deleteReplyAction");
+  }
+}
+
+// ── tasks ───────────────────────────────────────────────────────────────────
+
+/** Add a task (any team member). */
+export async function addTaskAction(
+  teamId: string,
+  slug: string,
+  input: { text: string; assignee: string; due: string }
+): Promise<TeamActionResult> {
+  if (!teamId) return { ok: false, error: "Missing team." };
+  try {
+    const res = await addTeamTask(teamId, input);
+    if (res.status !== "ok") return { ok: false, error: res.error };
+    revalidatePath(`/teams/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    return fail(e, "addTaskAction");
+  }
+}
+
+/** Tick, reassign or re-date a task (any team member). */
+export async function updateTaskAction(teamId: string, slug: string, taskId: string, patch: TaskPatch): Promise<TeamActionResult> {
+  if (!teamId || !taskId) return { ok: false, error: "Missing task." };
+  try {
+    const res = await updateTeamTask(teamId, taskId, patch);
+    if (res.status !== "ok") return { ok: false, error: res.error };
+    revalidatePath(`/teams/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    return fail(e, "updateTaskAction");
+  }
+}
+
+/** Delete a task (any team member). */
+export async function deleteTaskAction(teamId: string, slug: string, taskId: string): Promise<TeamActionResult> {
+  if (!teamId || !taskId) return { ok: false, error: "Missing task." };
+  try {
+    const res = await deleteTeamTask(teamId, taskId);
+    if (res.status !== "ok") return { ok: false, error: res.error };
+    revalidatePath(`/teams/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    return fail(e, "deleteTaskAction");
   }
 }
 

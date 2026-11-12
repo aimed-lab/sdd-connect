@@ -2,11 +2,22 @@
 
 // "What do you want to do?": four action cards. Three open a panel right under
 // the row (one at a time); "Make learning material" opens the assistant with
-// the team attached.
+// the team attached. Right after a team is created with "What will you work
+// on?" filled (?learn=1), the same request is sent once for that topic
+// (`learnPrompt`); the assistant then shows its usual confirm step, so the page
+// is only made if the lead says yes.
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { openAssistant, setPageTeam } from "@/lib/server/assistant/assistantBridge";
 import { makePagePrompt } from "@/lib/server/teams/teamRules";
+import {
+  cleanTeamUrl,
+  hasTeamOneTimeParams,
+  runOnceAfterMount,
+  sendLearnOnce,
+  sessionStore,
+} from "@/lib/server/teams/teamWorkRules";
 import ActionTile, { type Tone } from "@/components/ui/ActionTile";
 import AddDocumentPanel from "./AddDocumentPanel";
 import CuratePagesPanel from "./CuratePagesPanel";
@@ -39,13 +50,41 @@ export default function TeamTiles({
   slug,
   name,
   isLead,
+  learnPrompt = "",
 }: {
   teamId: string;
   slug: string;
   name: string;
   isLead: boolean;
+  /** Non-empty only on the lead's first visit after creating the team with a topic. */
+  learnPrompt?: string;
 }) {
   const { panel, toggle, close } = useTeamPanel();
+
+  // Send the creation topic to the assistant once, on the next tick (so the
+  // assistant's listener in the root layout is mounted on a full page load),
+  // then drop the one-time params (?created, ?skipped, ?learn) so a reload,
+  // Back or a server action can't send it again. Three guards:
+  //   * runOnceAfterMount: once per mount, and Strict Mode safe;
+  //   * sessionStorage "team-learn-sent:<slug>": never twice in this browser
+  //     session, even if learn=1 is in the URL again;
+  //   * router.replace, not window.history: Next keeps its own copy of the URL
+  //     and wrote ?created=1&learn=1 back on the next server action when only
+  //     the address bar was changed (see cleanTeamUrl).
+  // The URL is cleaned only after the send: cleaning it re-renders the page
+  // without learnPrompt, which would cancel a send still waiting on its tick.
+  const router = useRouter();
+  const learnSent = useRef(false);
+  useEffect(() => {
+    if (!learnPrompt) return;
+    return runOnceAfterMount(learnSent, () => {
+      sendLearnOnce(sessionStore(), slug, () =>
+        openAssistant({ text: learnPrompt, mode: "send", team: { id: teamId, name, slug } })
+      );
+      const { pathname, search, hash } = window.location;
+      if (hasTeamOneTimeParams(search)) router.replace(cleanTeamUrl(pathname, search, hash), { scroll: false });
+    });
+  }, [learnPrompt, teamId, name, slug, router]);
 
   // Tell the assistant which team this page is, so a message typed by hand
   // still makes a page for this team and stays on the page.

@@ -35,6 +35,7 @@ import {
   visibilityAfterCurate,
   curateNote,
   parseEmails,
+  parseTeamFocus,
   parseTeamName,
   type CuratedHow,
 } from "./teamRules";
@@ -168,9 +169,13 @@ export type CreateTeamResult =
  *  is added the same way a community admin adds a member by email (a person
  *  with an account is linked now; anyone else is linked when they sign up with
  *  that email). One bad address does not undo the team; it is reported. */
-export async function createTeam(input: { name: unknown; emails?: unknown }): Promise<CreateTeamResult> {
+export async function createTeam(input: { name: unknown; emails?: unknown; focus?: unknown }): Promise<CreateTeamResult> {
   const name = parseTeamName(input.name);
   if (!name.ok) return { status: "error", error: name.error };
+  // "What will you work on?" becomes the team's description (shown to anyone
+  // with the team link, as the form says).
+  const focus = parseTeamFocus(input.focus);
+  if (!focus.ok) return { status: "error", error: focus.error };
 
   const emails = parseEmails(input.emails ?? "");
   if (emails.invalid.length > 0) {
@@ -181,7 +186,7 @@ export async function createTeam(input: { name: unknown; emails?: unknown }): Pr
   }
   if (emails.tooMany) return { status: "error", error: "That is a lot of people. Add up to 50 now and the rest later." };
 
-  const created = await createCommunity({ name: name.name, purpose: "", kind: "team" });
+  const created = await createCommunity({ name: name.name, purpose: focus.text, kind: "team" });
   if (created.status !== "ok") return { status: "error", error: created.error };
 
   let added = 0;
@@ -531,7 +536,7 @@ const NOT_READY =
 
 /** An active member of a TEAM, or the message to show. Communities are refused:
  *  nothing here applies to them. */
-async function requireTeamMember(teamId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function requireTeamMember(teamId: string): Promise<{ ok: true } | { ok: false; error: string }> {
   if ((await getCommunityKind(teamId)) !== "team") return { ok: false, error: "This is only for teams." };
   const membership = await getMembership(teamId);
   if (membership.state !== "active") return { ok: false, error: "Only team members can do this." };
