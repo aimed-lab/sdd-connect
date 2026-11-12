@@ -1,6 +1,9 @@
 "use client";
 
-// /teams/new: one field, one optional box, one button. Signed out, the button
+// /teams/new: the name, an optional "What will you work on?" (it becomes the
+// team description, which anyone with the link sees), an optional email box,
+// one button. With a topic, the team page opens the assistant once to start a
+// wiki page on it (?learn=1, see TeamTiles). Signed out, the button
 // becomes the existing sign-in link with a way back here that keeps the typed
 // name (lib/server/teams/teamRules.ts: createTeamCallback). No new auth.
 
@@ -8,7 +11,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createTeamAction } from "@/app/teams/actions";
-import { createTeamCallback, TEAM_NAME_MAX } from "@/lib/server/teams/teamRules";
+import { createTeamCallback, TEAM_FOCUS_MAX, TEAM_NAME_MAX } from "@/lib/server/teams/teamRules";
 
 const INPUT =
   "w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary";
@@ -16,6 +19,7 @@ const INPUT =
 export default function CreateTeamForm({ signedIn, initialName }: { signedIn: boolean; initialName: string }) {
   const router = useRouter();
   const [name, setName] = useState(initialName);
+  const [focus, setFocus] = useState("");
   const [emails, setEmails] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,14 +29,15 @@ export default function CreateTeamForm({ signedIn, initialName }: { signedIn: bo
     if (saving || !signedIn) return;
     setSaving(true);
     setError(null);
-    const res = await createTeamAction({ name, emails });
+    const res = await createTeamAction({ name, emails, focus });
     if (!res.ok) {
       setError(res.error);
       setSaving(false);
       return;
     }
     const skipped = res.problems.length;
-    router.push(`/teams/${res.slug}?created=1${skipped ? `&skipped=${skipped}` : ""}`);
+    const learn = focus.trim() ? "&learn=1" : "";
+    router.push(`/teams/${res.slug}?created=1${skipped ? `&skipped=${skipped}` : ""}${learn}`);
   };
 
   return (
@@ -52,6 +57,25 @@ export default function CreateTeamForm({ signedIn, initialName }: { signedIn: bo
           placeholder="e.g. KRAS journal club"
           className={INPUT}
         />
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <label htmlFor="team-focus" className="font-label-md text-label-md text-on-background">
+          What will you work on? <span className="text-secondary font-normal">(optional)</span>
+        </label>
+        <input
+          id="team-focus"
+          type="text"
+          maxLength={TEAM_FOCUS_MAX}
+          value={focus}
+          onChange={(e) => setFocus(e.target.value)}
+          placeholder="e.g. KRAS G12C resistance in lung cancer"
+          aria-describedby="team-focus-help"
+          className={INPUT}
+        />
+        <p id="team-focus-help" className="font-body-sm text-body-sm text-secondary">
+          Shown to anyone with the team link.
+        </p>
       </div>
 
       <div className="flex flex-col gap-2">

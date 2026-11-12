@@ -1,12 +1,14 @@
 // A team's page — /teams/[slug]. Simple and calm: a green hero (label, name,
 // one line, avatars, QR), then Progress and Handover side by side (stacked on a
-// phone), "What do you want to do?" with four tiles, then cards: Team wiki pages
+// phone), Tasks (full width), "What do you want to do?" with four tiles, then cards: Team wiki pages
 // and Shared documents (left), People and Team news (right). Nothing public: no
 // Explore feed, no tabs.
 //
 // Progress shows the team's tagged announcements and Handover its slotted
 // resources (2026-11-11_team_progress_handover.sql); those rows are left out of
-// Team news and Shared documents.
+// Team news and Shared documents. Replies under Progress updates and the Tasks
+// card come from 2026-11-11_team_replies_tasks.sql; before it is applied they
+// read as "no replies" / "no tasks".
 //
 // Someone who is not on the team (a QR scan, a shared link) sees only the
 // team's name and description and one button to join. Team content is
@@ -33,7 +35,11 @@ import {
   listTeamCommunities,
   listTeamPages,
 } from "@/lib/server/teams/teams";
-import { splitAnnouncements, splitResources } from "@/lib/server/teams/teamRules";
+import { creationLearnPrompt, splitAnnouncements, splitResources } from "@/lib/server/teams/teamRules";
+import { listProgressReplies, listTeamTasks } from "@/lib/server/teams/teamWork";
+import { groupReplies, teamToday } from "@/lib/server/teams/teamWorkRules";
+import TasksCard from "@/components/teams/TasksCard";
+import TeamCreatedNotice from "@/components/teams/TeamCreatedNotice";
 import { PageShell } from "@/components/PageHeader";
 import TeamHeader from "@/components/teams/TeamHeader";
 import HandoverCard from "@/components/teams/HandoverCard";
@@ -57,7 +63,7 @@ export default async function TeamPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ join?: string; created?: string; skipped?: string; settings?: string }>;
+  searchParams: Promise<{ join?: string; created?: string; skipped?: string; settings?: string; learn?: string }>;
 }) {
   const { slug } = await params;
   const query = await searchParams;
@@ -97,7 +103,7 @@ export default async function TeamPage({
   }
 
   const isLead = membership.isAdmin;
-  const [roster, allResources, pinnedId, pages, allAnnouncements, members, linked, linkable, progressTags, handoverSlots] = await Promise.all([
+  const [roster, allResources, pinnedId, pages, allAnnouncements, members, linked, linkable, progressTags, handoverSlots, replyRows, tasks] = await Promise.all([
     listMemberRoster(team.id),
     listCommunityResources(team.id),
     getPinnedResourceId(team.id),
@@ -108,7 +114,11 @@ export default async function TeamPage({
     isLead ? listCommunitiesToLink() : Promise.resolve([]),
     listProgressTags(team.id),
     listHandoverSlots(team.id),
+    // Both are [] until 2026-11-11_team_replies_tasks.sql is applied.
+    listProgressReplies(team.id),
+    listTeamTasks(team.id),
   ]);
+  const replies = groupReplies(replyRows);
 
   // Tagged announcements are Progress, the rest Team news; slotted resources are
   // Handover, the rest Shared documents.
@@ -119,6 +129,16 @@ export default async function TeamPage({
     roster.filter((m) => m.user_id).map((m) => [m.user_id as string, m.display_name])
   );
   const skipped = Number(query.skipped) || 0;
+  // The team's members with an account, for the task assignee picker.
+  const taskMembers = roster
+    .filter((m) => m.user_id)
+    .map((m) => ({ id: m.user_id as string, name: m.display_name }));
+  // Just created with "What will you work on?" filled: the lead's assistant
+  // opens once with the wiki page request for that topic (nothing is created
+  // until they confirm). The param is dropped from the URL after that.
+  const learnPrompt = query.learn === "1" && isLead ? creationLearnPrompt(team.name, team.description) : "";
+  // Today in US Central time, for "Today" / "Tomorrow" / overdue on the Tasks card.
+  const today = teamToday();
 
   return (
     <PageShell className="flex flex-col gap-6 !max-w-[1120px]">
@@ -132,12 +152,9 @@ export default async function TeamPage({
         </Link>
       </div>
 
-      {query.created === "1" && (
-        <p role="status" className="rounded-xl bg-surface-container-low text-primary px-4 py-3 font-body-md text-body-md">
-          Team created. You are its Lead. Scan or share the QR code to bring people in.
-          {skipped > 0 ? ` ${skipped} email${skipped === 1 ? "" : "s"} could not be added; try them again in Team settings.` : ""}
-        </p>
-      )}
+      {/* Rendered on every visit (it shows nothing without ?created=1) so it
+          keeps its place, and its message, after the URL is cleaned. */}
+      <TeamCreatedNotice slug={team.slug} created={query.created === "1"} skipped={skipped} learnPending={!!learnPrompt} />
 
       <TeamPanelProvider>
         <TeamHeader
@@ -152,6 +169,7 @@ export default async function TeamPage({
             teamId={team.id}
             slug={team.slug}
             items={progress.map((u) => ({ id: u.id, author_id: u.author_id, title: u.title, created_at: u.created_at, tag: u.tag }))}
+            replies={replies}
             names={names}
             viewerId={user?.id ?? ""}
             isLead={isLead}
@@ -177,7 +195,9 @@ export default async function TeamPage({
           />
         </div>
 
-        <TeamTiles teamId={team.id} slug={team.slug} name={team.name} isLead={isLead} />
+        <TasksCard teamId={team.id} slug={team.slug} tasks={tasks} members={taskMembers} today={today} />
+
+        <TeamTiles teamId={team.id} slug={team.slug} name={team.name} isLead={isLead} learnPrompt={learnPrompt} />
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
           <div className="lg:col-span-2 flex flex-col gap-6 min-w-0">

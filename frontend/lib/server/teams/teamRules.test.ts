@@ -21,6 +21,9 @@ import {
   isKind,
   joinView,
   makePagePrompt,
+  creationLearnPrompt,
+  parseTeamFocus,
+  TEAM_FOCUS_MAX,
   normalizeSettings,
   pageLabel,
   parseEmails,
@@ -254,6 +257,27 @@ test("labels: Lead / Member, the header line", () => {
 test("the learning-material prompt names the team and ends where the topic goes", () => {
   assert.equal(makePagePrompt("KRAS club"), "Make a wiki page for my team KRAS club about: ");
   assert.equal(makePagePrompt("  A   B "), "Make a wiki page for my team A B about: ");
+});
+
+test("creationLearnPrompt: the tile's request with the creation topic after 'about:'", () => {
+  assert.equal(
+    creationLearnPrompt("KRAS club", "  KRAS G12C\n resistance "),
+    "Make a wiki page for my team KRAS club about: KRAS G12C resistance"
+  );
+  // What the assistant reads back as the topic is exactly what was typed.
+  assert.equal(teamTopicFromMessage(creationLearnPrompt("Lung Lab", "EGFR inhibitors")), "EGFR inhibitors");
+  // No topic: nothing to send.
+  assert.equal(creationLearnPrompt("KRAS club", ""), "");
+  assert.equal(creationLearnPrompt("KRAS club", null), "");
+  assert.equal(creationLearnPrompt("KRAS club", "   "), "");
+});
+
+test("parseTeamFocus: optional, one line, at most 160", () => {
+  assert.equal(TEAM_FOCUS_MAX, 160);
+  assert.deepEqual(parseTeamFocus(undefined), { ok: true, text: "" });
+  assert.deepEqual(parseTeamFocus("  organoid\n models "), { ok: true, text: "organoid models" });
+  assert.equal(parseTeamFocus("x".repeat(160)).ok, true);
+  assert.equal(parseTeamFocus("x".repeat(161)).ok, false);
 });
 
 test("team ids from outside must be real ids", () => {

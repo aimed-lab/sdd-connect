@@ -262,6 +262,28 @@ export function makePagePrompt(teamName: string): string {
   return `Make a wiki page for my team ${teamName.replace(/\s+/g, " ").trim().slice(0, 80)} about: `;
 }
 
+/** Max length of "What will you work on?" on the create form. It becomes the
+ *  team's one-line description, so it has the description's limit
+ *  (TEAM_DESCRIPTION_MAX in teams.ts). */
+export const TEAM_FOCUS_MAX = 160;
+
+/** The create form's "What will you work on?": optional, one line, at most
+ *  TEAM_FOCUS_MAX. Empty is fine (no description, no assistant). */
+export function parseTeamFocus(raw: unknown): { ok: true; text: string } | { ok: false; error: string } {
+  const text = typeof raw === "string" ? raw.replace(/\s+/g, " ").trim() : "";
+  if (text.length > TEAM_FOCUS_MAX) return { ok: false, error: `Keep it under ${TEAM_FOCUS_MAX} letters.` };
+  return { ok: true, text };
+}
+
+/** The request the assistant is sent once, right after a team is created with
+ *  "What will you work on?" filled: the same "make a wiki page for my team"
+ *  request as the tile, with that topic after "about:". "" when there is no
+ *  topic (then nothing is sent). */
+export function creationLearnPrompt(teamName: string, focus: string | null | undefined): string {
+  const topic = (focus ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+  return topic ? `${makePagePrompt(teamName)}${topic}` : "";
+}
+
 /** The topic in a team page request: only the part after "about:", never the
  *  team name. "" when the message has no "about:" or nothing after it. */
 export function teamTopicFromMessage(text: string): string {
