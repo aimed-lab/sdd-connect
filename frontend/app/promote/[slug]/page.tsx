@@ -33,6 +33,8 @@ import { cardImageUrlFor } from "@/lib/server/promote/shareText";
 import OwnerMenu from "@/components/promote/OwnerMenu";
 import { SHOWCASE_TYPE_LABEL } from "@/lib/showcaseTypes";
 import ShareButtons from "@/components/promote/ShareButtons";
+import PromoteQrCard from "@/components/promote/PromoteQrCard";
+import { promoteQrUrl } from "@/lib/server/promote/qrCode";
 
 export const dynamic = "force-dynamic";
 
@@ -170,6 +172,9 @@ export default async function ArticlePage({ params }: PageProps) {
           <span className="material-symbols-outlined text-base">download</span>
           Download visual card
         </a>
+
+        {/* Only published items reach this page (a draft 404s above). */}
+        <PromoteQrCard url={promoteQrUrl(SITE_URL, article.slug)} slug={article.slug} title={article.headline} />
 
         <ShareButtons url={url} title={article.headline} shareText={article.shareText} layout="column" />
       </section>
