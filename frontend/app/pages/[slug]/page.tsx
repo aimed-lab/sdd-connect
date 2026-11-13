@@ -157,6 +157,7 @@ export default async function LivingPage({
         {tab === "new" && (
           <WhatsNew
             updates={updates}
+            evidence={evidence}
             createdLine={creationLine(
               page.created_at,
               initialSourceCount(evidence.map((e) => e.id), updates)

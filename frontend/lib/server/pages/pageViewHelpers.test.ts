@@ -12,6 +12,10 @@ import {
   newItemsCutoffIso,
   parseNoteBody,
   summarizeKinds,
+  updateChipLabel,
+  updateItemDate,
+  updateItemMeta,
+  whatsNewItems,
   type EvidenceRow,
   type UpdateRow,
 } from "./pageViewHelpers.ts";
@@ -129,4 +133,107 @@ test("creationLine: 'Page created <date> with <N> sources'", () => {
   assert.equal(creationLine("2026-10-20T08:00:00Z", 0, NOW), "Page created Oct 20");
   assert.equal(creationLine("2025-03-02T08:00:00Z", 3, NOW), "Page created Mar 2, 2025 with 3 sources");
   assert.equal(creationLine(null, 3, NOW), "Page created with 3 sources");
+});
+
+test("updateChipLabel: one label per known kind, 'Source' for anything else", () => {
+  const want: Record<string, string> = {
+    paper: "Paper",
+    preprint: "Preprint",
+    trial: "Trial",
+    approval: "FDA approval",
+    dataset: "Dataset",
+    compound: "Compound",
+    target: "Target",
+    grant: "Grant",
+    tool: "Tool",
+    news: "News",
+  };
+  for (const [kind, label] of Object.entries(want)) assert.equal(updateChipLabel(kind), label, kind);
+  for (const kind of ["geneset", "episode", "person", "", "Paper"]) assert.equal(updateChipLabel(kind), "Source", kind);
+});
+
+test("updateItemDate / updateItemMeta: year for papers, month and year otherwise, missing parts left out", () => {
+  assert.equal(updateItemDate("paper", "2026-11-03"), "2026");
+  assert.equal(updateItemDate("preprint", "2026-11-03T00:00:00Z"), "2026");
+  assert.equal(updateItemDate("trial", "2026-11-03"), "Nov 2026");
+  assert.equal(updateItemDate("dataset", "2025-01-31T23:59:59Z"), "Jan 2025");
+  assert.equal(updateItemDate("trial", "2026"), "2026");
+  assert.equal(updateItemDate("paper", null), null);
+  assert.equal(updateItemDate("paper", "1970-01-01"), null);
+  assert.equal(updateItemMeta("paper", "pubmed", "2026-05-01"), "PubMed · 2026");
+  assert.equal(updateItemMeta("trial", "clinicaltrials", "2026-11-02"), "ClinicalTrials.gov · Nov 2026");
+  assert.equal(updateItemMeta("dataset", "geo", null), "GEO");
+  assert.equal(updateItemMeta("paper", null, "2024-03-01"), "2024");
+  assert.equal(updateItemMeta("paper", "", null), null);
+});
+
+const row = (id: string, kind: string, title: string, evidence_id: string | null = null): UpdateRow => ({
+  id,
+  kind,
+  title,
+  summary: null,
+  url: `https://x/${id}`,
+  occurred_on: "2026-11-10",
+  evidence_id,
+});
+
+test("whatsNewItems: chip and source/date from the linked evidence row", () => {
+  const items = whatsNewItems(
+    [row("a", "paper", "A paper", "ev-a"), row("b", "trial", "A trial", "ev-gone"), row("c", "geneset", "Genes")],
+    new Map([["ev-a", { source: "pubmed", date_iso: "2026-02-01" }]])
+  );
+  assert.deepEqual(
+    items.map((i) => [i.chip, i.title, i.meta, i.relatedLabel]),
+    [
+      ["Paper", "A paper", "PubMed · 2026", null],
+      ["Trial", "A trial", null, null],
+      ["Source", "Genes", null, null],
+    ]
+  );
+});
+
+test("whatsNewItems: titles differing only by a trailing bracket fold into one, linking to the first", () => {
+  const items = whatsNewItems(
+    [
+      row("p", "paper", "Unrelated paper"),
+      row("d1", "dataset", "Ovarian tumour atlas [ATAC-seq]", "ev-d1"),
+      row("d2", "dataset", "Ovarian tumour atlas [ChIP-seq]"),
+      row("d3", "dataset", "Ovarian tumour atlas [RNA-seq]"),
+      row("e", "dataset", "Another atlas [ATAC-seq]"),
+    ],
+    new Map([["ev-d1", { source: "geo", date_iso: "2026-10-01" }]])
+  );
+  assert.equal(items.length, 3);
+  assert.deepEqual(items.map((i) => i.id), ["p", "d1", "e"]);
+  const folded = items[1];
+  assert.equal(folded.title, "Ovarian tumour atlas");
+  assert.equal(folded.url, "https://x/d1");
+  assert.equal(folded.count, 3);
+  assert.equal(folded.relatedLabel, "(3 related datasets)");
+  assert.equal(folded.meta, "GEO · Oct 2026");
+  // A lone bracketed title is left as it is.
+  assert.equal(items[2].title, "Another atlas [ATAC-seq]");
+  assert.equal(items[2].relatedLabel, null);
+});
+
+test("whatsNewItems: no fold across kinds, nor for different titles or a bracket mid-title", () => {
+  const items = whatsNewItems(
+    [
+      row("a", "dataset", "Atlas [ATAC-seq]"),
+      row("b", "paper", "Atlas [ChIP-seq]"),
+      row("c", "dataset", "Atlas two [ChIP-seq]"),
+      row("d", "dataset", "[Review] Atlas"),
+    ],
+    new Map()
+  );
+  assert.equal(items.length, 4);
+  assert.ok(items.every((i) => i.count === 1 && i.relatedLabel === null));
+});
+
+test("whatsNewItems: a plain title and its bracketed variant fold; two plain duplicates do not", () => {
+  const folded = whatsNewItems([row("a", "dataset", "Atlas"), row("b", "dataset", "Atlas [ATAC-seq]")], new Map());
+  assert.equal(folded.length, 1);
+  assert.equal(folded[0].relatedLabel, "(2 related datasets)");
+  const plain = whatsNewItems([row("a", "paper", "Same"), row("b", "paper", "Same")], new Map());
+  assert.equal(plain.length, 2);
 });

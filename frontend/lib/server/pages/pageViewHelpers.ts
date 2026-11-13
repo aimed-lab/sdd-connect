@@ -1,10 +1,11 @@
 // lib/server/pages/pageViewHelpers.ts — pure helpers behind the /pages screens.
 //
-// No runtime imports (type-only imports are erased), so `npm test` runs
-// pageViewHelpers.test.ts under node --test and client components may import
-// this file freely.
+// The only runtime import is communityHome.ts, itself pure (type-only imports
+// are erased), so `npm test` runs pageViewHelpers.test.ts under node --test
+// and client components may import this file freely.
 
 import type { ExploreItem, ExploreSection } from "../../../types/explore";
+import { sourceName } from "../communityHome/communityHome.ts";
 
 // ── visibility ───────────────────────────────────────────────────────────────
 
@@ -122,6 +123,104 @@ export function groupUpdatesByDate(rows: UpdateRow[], now: Date = new Date()): U
       const label = formatDay(date, now) ?? date;
       return { date, label, headline: `${label}: ${summarizeKinds(items)}`, items };
     });
+}
+
+// ── "What's new" item rows ───────────────────────────────────────────────────
+
+const UPDATE_CHIP: Record<string, string> = {
+  paper: "Paper",
+  preprint: "Preprint",
+  trial: "Trial",
+  approval: "FDA approval",
+  dataset: "Dataset",
+  compound: "Compound",
+  target: "Target",
+  grant: "Grant",
+  tool: "Tool",
+  news: "News",
+};
+
+/** The type chip before an item's title; any kind not listed reads "Source". */
+export function updateChipLabel(kind: string): string {
+  return UPDATE_CHIP[kind] ?? "Source";
+}
+
+/** The item's own date for the grey line: the year for papers and preprints
+ *  ("2026"), month and year for everything else ("Nov 2026"). Read from the
+ *  text (no local-time Date), so it can't slip across a month or year. */
+export function updateItemDate(kind: string, dateIso: string | null | undefined): string | null {
+  const m = /^(\d{4})(?:-(\d{2}))?/.exec(dateIso ?? "");
+  if (!m) return null;
+  const year = Number(m[1]);
+  if (year <= 1970) return null; // epoch / placeholder
+  const month = m[2] ? MONTHS[Number(m[2]) - 1] : undefined;
+  if (kind === "paper" || kind === "preprint" || !month) return m[1];
+  return `${month} ${m[1]}`;
+}
+
+/** "PubMed · 2026", "ClinicalTrials.gov · Nov 2026", whichever half exists, or null. */
+export function updateItemMeta(
+  kind: string,
+  source: string | null | undefined,
+  dateIso: string | null | undefined
+): string | null {
+  const parts = [sourceName(source), updateItemDate(kind, dateIso)].filter((p): p is string => !!p);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+export type WhatsNewItem = {
+  id: string;
+  kind: string;
+  chip: string;
+  title: string;
+  url: string | null;
+  meta: string | null;
+  /** Items folded into this one (itself included); 1 for a plain item. */
+  count: number;
+  /** "(3 related datasets)" when count > 1, else null. */
+  relatedLabel: string | null;
+};
+
+const TRAILING_BRACKET = /\s*\[[^\][]*\]\s*$/;
+
+/** One day's update rows as display items. Rows of the same kind whose titles
+ *  are identical apart from a trailing bracket ("... [ATAC-seq]", "...
+ *  [ChIP-seq]") fold into one item that links to the first of them and shows
+ *  the shared title. Source and date come from the row's own page_evidence
+ *  entry (`evidenceById`), when it is still there. Order is kept. */
+export function whatsNewItems(
+  rows: UpdateRow[],
+  evidenceById: Map<string, Pick<EvidenceRow, "source" | "date_iso">>
+): WhatsNewItem[] {
+  const out: WhatsNewItem[] = [];
+  const byKey = new Map<string, { item: WhatsNewItem; bracketed: boolean }>();
+  for (const r of rows) {
+    const bracketed = TRAILING_BRACKET.test(r.title);
+    const base = r.title.replace(TRAILING_BRACKET, "").trim();
+    const key = `${r.kind}\u0000${base.toLowerCase()}`;
+    const seen = base ? byKey.get(key) : undefined;
+    if (seen && (bracketed || seen.bracketed)) {
+      seen.item.count += 1;
+      seen.item.title = base;
+      seen.item.relatedLabel = `(${seen.item.count} related ${kindNoun(r.kind, seen.item.count)})`;
+      seen.bracketed = true;
+      continue;
+    }
+    const ev = r.evidence_id ? evidenceById.get(r.evidence_id) : undefined;
+    const item: WhatsNewItem = {
+      id: r.id,
+      kind: r.kind,
+      chip: updateChipLabel(r.kind),
+      title: r.title,
+      url: r.url,
+      meta: updateItemMeta(r.kind, ev?.source, ev?.date_iso),
+      count: 1,
+      relatedLabel: null,
+    };
+    out.push(item);
+    if (base && !seen) byKey.set(key, { item, bracketed });
+  }
+  return out;
 }
 
 /** How many sources the page had when it was first built: the evidence rows
