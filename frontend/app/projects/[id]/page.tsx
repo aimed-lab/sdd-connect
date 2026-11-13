@@ -150,7 +150,7 @@ export default async function ProjectDetailPage({
 
   const project = result.project;
 
-  // A ColaboFest project (projects.program) gets the minimal tile page: the views Tasks
+  // A CollaboFest project (projects.program) gets the minimal tile page: the views Tasks
   // (finalists), Project files, Announcements, Team, Timeline and Manage (the SPARC
   // team). Manage shows the sections this page used to show, one at a time
   // (?view=manage&section=...). Every other project is exactly as before.
@@ -193,7 +193,7 @@ export default async function ProjectDetailPage({
   const needsAdminFlag = isColabofest || tab === "team" || tab === "announcements" || tab === "discussions";
   const isSiteAdmin = needsAdminFlag && db ? await viewerIsSiteAdmin(db) : false;
 
-  // The tab-by-tab content of an ordinary project (and, for a ColaboFest project, the cards
+  // The tab-by-tab content of an ordinary project (and, for a CollaboFest project, the cards
   // of its Manage view): the sections this page always had.
   const renderTab = async (tab: TabKey): Promise<React.ReactNode> => {
   // The wiki pages are needed by the Wiki tab.
@@ -512,7 +512,7 @@ export default async function ProjectDetailPage({
           manageNode={manageNode}
           nextDate={nextTimelineDate(today)}
         />
-        {/* No floating chat button on ColaboFest project pages. */}
+        {/* No floating chat button on CollaboFest project pages. */}
       </div>
     );
   }

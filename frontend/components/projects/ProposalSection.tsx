@@ -1,6 +1,6 @@
 "use client";
 
-// Proposal section — frontend/design/projects/STRUCTURE.md, ColaboFest
+// Proposal section — frontend/design/projects/STRUCTURE.md, CollaboFest
 // detail workspace, "Proposal Details". The PARENT page only renders this
 // component at all when project.challenge_key is set — an ordinary project
 // has no Proposal section, full stop, not an empty/disabled one.

@@ -1,6 +1,6 @@
 "use client";
 
-// The Tasks view of a ColaboFest project: up to three lists (Your team, SPARC, Southern
+// The Tasks view of a CollaboFest project: up to three lists (Your team, SPARC, Southern
 // Research), each with a small header and its own bar ("2 of 5 done"). A row is a round
 // status circle (a green ✓ when done), the title, a one-line description, the owner, the
 // due date and, for people allowed to change it, "Mark done" / "Undo". The lead and the

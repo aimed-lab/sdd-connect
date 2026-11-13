@@ -1,4 +1,4 @@
-// lib/server/projectWorkspace/finalistTasks.ts: the pure rules of the ColaboFest
+// lib/server/projectWorkspace/finalistTasks.ts: the pure rules of the CollaboFest
 // finalist page: the three tasks and their status (read from checklist_items by
 // label), the to-do banner, who may mark a task, the view names, the tile lines and
 // the next date on the timeline. No imports from next/*, so `npm test` covers it.

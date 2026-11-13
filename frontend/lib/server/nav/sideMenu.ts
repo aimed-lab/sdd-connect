@@ -29,7 +29,7 @@ export const DISCOVER: MenuItem[] = [
   { label: "Collaborate", href: "/collaborate", icon: "handshake", description: "Service providers and resources" },
   { label: "Promote", href: "/promote", icon: "campaign", description: "Share a paper or a result" },
   { label: "Communities", href: "/communities", icon: "groups", description: "Researchers in your area" },
-  { label: "ColaboFest 2026", href: "/programs/colabofest-2026", icon: "emoji_events", description: "Timeline and finalists" },
+  { label: "CollaboFest 2026", href: "/programs/colabofest-2026", icon: "emoji_events", description: "Timeline and finalists" },
 ];
 
 /** The groups in order. "My work" is for signed-in people only. */

@@ -1,4 +1,4 @@
-// lib/server/projectWorkspace/finalistTasksDb.ts: mark a ColaboFest finalist task done or
+// lib/server/projectWorkspace/finalistTasksDb.ts: mark a CollaboFest finalist task done or
 // not done. The status lives in the project's checklist_items (found by the task's
 // label). Only the project lead and the managers may mark one (checked here against
 // the caller's own project_members row; the checklist policies stay member-based).

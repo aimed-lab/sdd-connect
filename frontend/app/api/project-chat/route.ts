@@ -13,7 +13,7 @@ import { MODALITY_LABEL, PROJECT_STAGE_LABEL, type Modality, type ProjectStage }
 // project's own data as context. See CLAUDE.md-adjacent design note in the
 // task: a chatbot that searches is the agent again, at agent cost, on every
 // turn. This route is pull-based (a member asks), unlike the agent (which
-// pushes proposals), which is why it's available on ColaboFest projects too.
+// pushes proposals), which is why it's available on CollaboFest projects too.
 //
 // AUTH: same idiom as /api/project-agent/start — getProject()'s "not_found
 // covers both doesn't-exist and not-a-member" gate is the only membership

@@ -1,5 +1,5 @@
 // lib/server/projectWorkspace/colabofestOps.ts: the small writes of the
-// ColaboFest project home that are not announcements or discussions: the
+// CollaboFest project home that are not announcements or discussions: the
 // finalist flag (site admin only), a member's affiliation (a lead sets it) and
 // "is the viewer a site admin". Through the caller's own session; the database
 // (2026-10-31_colabofest_project_core.sql) is the real gate.

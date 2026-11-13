@@ -20,7 +20,7 @@ const person = (o: Partial<PersonRow>): PersonRow => ({
   ...o,
 });
 
-test("only the ColaboFest slug is the invite-only community, with its own description", () => {
+test("only the CollaboFest slug is the invite-only community, with its own description", () => {
   assert.equal(isColabofestCommunity("colabofest-2026"), true);
   assert.equal(isColabofestCommunity("biokdd"), false);
   assert.match(communityDescription("colabofest-2026", "old") ?? "", /Each team works in its own private project/);
@@ -44,16 +44,16 @@ test("members: community rows and project rows merge by user id, else lowercased
 });
 
 test("project code comes from the description line", () => {
-  assert.equal(projectCode("ColaboFest 2026 · C-108"), "C-108");
+  assert.equal(projectCode("CollaboFest 2026 · C-108"), "C-108");
   assert.equal(projectCode("nothing here"), null);
   assert.equal(projectCode(null), null);
 });
 
 test("projects view: code order, own project first, others have no id, only titles", () => {
   const src = [
-    { id: "p8", name: "Eight", description: "ColaboFest 2026 · C-108" },
-    { id: "p1", name: "One", description: "ColaboFest 2026 · C-101" },
-    { id: "p3", name: "Three", description: "ColaboFest 2026 · C-103" },
+    { id: "p8", name: "Eight", description: "CollaboFest 2026 · C-108" },
+    { id: "p1", name: "One", description: "CollaboFest 2026 · C-101" },
+    { id: "p3", name: "Three", description: "CollaboFest 2026 · C-103" },
     { id: "px", name: "No code", description: null },
   ];
   const rows = buildProjectRows(src, { myProjectIds: ["p3"], openAll: false });

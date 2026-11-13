@@ -79,7 +79,7 @@ test("My work and Discover: the items, in order", () => {
     ["Collaborate", "/collaborate", "Service providers and resources"],
     ["Promote", "/promote", "Share a paper or a result"],
     ["Communities", "/communities", "Researchers in your area"],
-    ["ColaboFest 2026", "/programs/colabofest-2026", "Timeline and finalists"],
+    ["CollaboFest 2026", "/programs/colabofest-2026", "Timeline and finalists"],
   ]);
   assert.ok(MY_WORK.every((i) => i.tint) && DISCOVER.every((i) => !i.tint));
 });

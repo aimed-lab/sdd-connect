@@ -1,4 +1,4 @@
-// Run with `npm test`. The ColaboFest project cards (/programs/colabofest-2026) and the
+// Run with `npm test`. The CollaboFest project cards (/programs/colabofest-2026) and the
 // order of the cards there and on /projects.
 
 import test from "node:test";
@@ -32,9 +32,9 @@ const item = (label: string, status: string, list_key: string | null, due_date: 
 // ── code and order ───────────────────────────────────────────────────────────
 
 test("projectCode: the C-### part of the description line", () => {
-  assert.equal(projectCode("ColaboFest 2026 · C-108"), "C-108");
-  assert.equal(projectCode("ColaboFest 2026 · C-101\nmore text"), "C-101");
-  for (const none of ["ColaboFest 2026", "ABC-12x", "", null, undefined]) assert.equal(projectCode(none), null, String(none));
+  assert.equal(projectCode("CollaboFest 2026 · C-108"), "C-108");
+  assert.equal(projectCode("CollaboFest 2026 · C-101\nmore text"), "C-101");
+  for (const none of ["CollaboFest 2026", "ABC-12x", "", null, undefined]) assert.equal(projectCode(none), null, String(none));
 });
 
 test("order on the program page: finalists first, then the rest, each group by code", () => {
@@ -51,7 +51,7 @@ test("order on the program page: finalists first, then the rest, each group by c
   assert.equal(cards[0].name, "h", "the input is not reordered");
 });
 
-test("order on /projects: ColaboFest finalists, other ColaboFest by code, then the rest as they came", () => {
+test("order on /projects: CollaboFest finalists, other CollaboFest by code, then the rest as they came", () => {
   const p = (name: string, inProgram: boolean, finalist: boolean, code: string | null) => ({ name, inProgram, finalist, code });
   const sorted = sortMyProjects([
     p("newest other", false, false, null),
@@ -178,7 +178,7 @@ test("a whole card", () => {
   const card = buildProgramCardView({
     id: "p1",
     name: "CD38 Fibrosis",
-    description: "ColaboFest 2026 · C-107",
+    description: "CollaboFest 2026 · C-107",
     finalist: true,
     teamSize: 6,
     items: [finalistItem(0, "ready")],
@@ -210,7 +210,7 @@ test("a whole card", () => {
 
 test("the program page: new wording, same links, and never 'winner'", () => {
   const page = read("app/programs/colabofest-2026/page.tsx");
-  assert.match(page, /How each ColaboFest project is doing: tasks, due dates and the latest announcements, in one place\./);
+  assert.match(page, /How each CollaboFest project is doing: tasks, due dates and the latest announcements, in one place\./);
   assert.match(page, /programCountLine\(result\.cards\.length, finalists\)/);
   assert.match(page, /href=\{tabHref\(c\.id, "overview"\)\}[^>]*>\s*Open project/);
   assert.match(page, /href=\{tabHref\(c\.id, "announcements"\)\}[^>]*>\s*Announcements/);
@@ -228,13 +228,13 @@ test("the program page: new wording, same links, and never 'winner'", () => {
   assert.equal(program.split(".from(").length - 1, 6, "no new query");
 });
 
-test("/projects: the order, one ColaboFest line with the Finalist badge, a three-line title, no divider", () => {
+test("/projects: the order, one CollaboFest line with the Finalist badge, a three-line title, no divider", () => {
   assert.match(read("app/projects/page.tsx"), /sortMyProjects\(/);
   const card = read("components/projects/ProjectCard.tsx");
   assert.match(card, /title=\{project\.name\}/);
   assert.match(card, /line-clamp-3/);
   assert.match(card, /★ Finalist/);
   assert.ok(!card.includes("border-t"), "no divider");
-  assert.ok(!card.includes('? "ColaboFest 2026"'), "no separate ColaboFest 2026 tag");
+  assert.ok(!card.includes('? "CollaboFest 2026"'), "no separate CollaboFest 2026 tag");
   assert.match(read("lib/server/projects.ts"), /challenge_key, program, finalist, created_at/);
 });

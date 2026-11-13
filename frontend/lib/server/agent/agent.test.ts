@@ -103,7 +103,7 @@ function fakeServices(
   return {
     communities: fakeCommunities(calls, membersOf),
     projects: {
-      list: async () => (calls.push("projects.list"), [{ id: PROJECT_ID, name: "CD38 Fibrosis", label: "ColaboFest 2026", challenge_key: null, program: "colabofest_2026", my_role: "lead", team_size: 3 }]),
+      list: async () => (calls.push("projects.list"), [{ id: PROJECT_ID, name: "CD38 Fibrosis", label: "CollaboFest 2026", challenge_key: null, program: "colabofest_2026", my_role: "lead", team_size: 3 }]),
       status: async (_db: unknown, id: string) => (calls.push("projects.status"), id === PROJECT_ID ? ({ id, project: "CD38 Fibrosis", status: "On track", checklists: [], overdue_items: [], open_help_requests: [], latest_updates: [], wiki_pages: [] } as never) : null),
     },
     listMyPages: rec("listMyPages", { status: "ok", pages: [] }),

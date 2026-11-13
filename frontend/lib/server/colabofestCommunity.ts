@@ -1,4 +1,4 @@
-// lib/server/colabofestCommunity.ts: the reads behind the ColaboFest 2026 community
+// lib/server/colabofestCommunity.ts: the reads behind the CollaboFest 2026 community
 // (rules in lib/server/communityHome/colabofest.ts).
 //
 // Who the VIEWER is comes from their own session (RLS, same as the project page):
@@ -18,13 +18,13 @@ type Row = Record<string, unknown>;
 const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v : null);
 
 export type ColabofestViewer = {
-  /** Ids of the ColaboFest projects the viewer has a project_members row on. */
+  /** Ids of the CollaboFest projects the viewer has a project_members row on. */
   projectIds: string[];
   /** Has role 'manager' (SPARC team) on at least one of them. */
   isManager: boolean;
 };
 
-/** The signed-in viewer's own ColaboFest project memberships; empty when signed out. */
+/** The signed-in viewer's own CollaboFest project memberships; empty when signed out. */
 export async function getColabofestViewer(): Promise<ColabofestViewer> {
   const none = { projectIds: [], isManager: false };
   const user = await getCurrentUser();
@@ -43,7 +43,7 @@ export async function getColabofestViewer(): Promise<ColabofestViewer> {
   return { projectIds: rows.map((m) => m.project_id as string), isManager: rows.some((m) => m.role === "manager") };
 }
 
-/** Every ColaboFest project (id, title, description line for ordering only). */
+/** Every CollaboFest project (id, title, description line for ordering only). */
 export async function listColabofestProjects(): Promise<ProjectSource[] | null> {
   const svc = getServiceRoleClient();
   if (!svc) return null;
@@ -53,7 +53,7 @@ export async function listColabofestProjects(): Promise<ProjectSource[] | null> 
 }
 
 /** Everyone in the community: its community_members rows (active) plus everyone on a
- *  ColaboFest project, one entry per person. Hidden staff rows are left out, except
+ *  CollaboFest project, one entry per person. Hidden staff rows are left out, except
  *  the viewer's own. */
 export async function listColabofestPeople(communityId: string, viewerUserId: string | null): Promise<PersonRow[]> {
   const svc = getServiceRoleClient();

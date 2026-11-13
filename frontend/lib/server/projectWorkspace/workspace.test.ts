@@ -51,8 +51,8 @@ test("tab links: Overview is the plain project URL, the others carry ?tab=", () 
 
 // ── sidebar text ─────────────────────────────────────────────────────────────
 
-test("project label: ColaboFest 2026 for that challenge, none for an ordinary project", () => {
-  assert.equal(projectLabel("colabofest_2026"), "ColaboFest 2026");
+test("project label: CollaboFest 2026 for that challenge, none for an ordinary project", () => {
+  assert.equal(projectLabel("colabofest_2026"), "CollaboFest 2026");
   assert.equal(projectLabel(null), null);
   assert.equal(projectLabel(""), null);
   assert.equal(projectLabel("spring_sprint_2027"), "Spring Sprint 2027");

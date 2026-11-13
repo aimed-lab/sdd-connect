@@ -554,12 +554,12 @@ export async function setAffiliationAction(projectId: string, memberId: string, 
   return run(projectId, "setAffiliationAction", () => setMemberAffiliation(projectId, memberId, affiliation));
 }
 
-/** Mark a ColaboFest finalist task done or not done: the project lead and the SPARC team only. */
+/** Mark a CollaboFest finalist task done or not done: the project lead and the SPARC team only. */
 export async function setFinalistTaskAction(projectId: string, taskKey: string, done: boolean): Promise<ActionResult> {
   return run(projectId, "setFinalistTaskAction", () => setFinalistTask(projectId, taskKey, done === true));
 }
 
-// ── the ColaboFest Tasks view (roles are checked in lib/server/projectWorkspace/cfChecklist.ts) ──
+// ── the CollaboFest Tasks view (roles are checked in lib/server/projectWorkspace/cfChecklist.ts) ──
 
 export type CfItemInput = { label: string; due: string; assigneeId: string };
 

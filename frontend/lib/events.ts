@@ -26,7 +26,7 @@ export const conferences: EventItem[] = [
 
 export const contests: EventItem[] = [
   {
-    name: "ColaboFest 2026",
+    name: "CollaboFest 2026",
     note: "SPARC's drug discovery challenge",
     href: "/communities/colabofest-2026",
   },

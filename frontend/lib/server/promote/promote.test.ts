@@ -327,13 +327,13 @@ test("a page that only shares generic words is not offered", () => {
 });
 
 const COMMUNITIES = [
-  { name: "ColaboFest 2026", description: "Collaboration sprint on open drug candidates.", explore_topics: ["PHGDH", "Alzheimer's disease", "open drug discovery"] },
+  { name: "CollaboFest 2026", description: "Collaboration sprint on open drug candidates.", explore_topics: ["PHGDH", "Alzheimer's disease", "open drug discovery"] },
   { name: "Cardiac Imaging Group", description: "MRI methods.", explore_topics: ["cardiac MRI"] },
 ];
 
 test("a long headline still finds the community whose topics name PHGDH", () => {
   const c = bestCommunity(`${PHGDH_HEADLINE} alzheimer ip-gating`, COMMUNITIES);
-  assert.equal(c?.community.name, "ColaboFest 2026");
+  assert.equal(c?.community.name, "CollaboFest 2026");
 });
 
 test("no community is offered when nothing in its name or topics matches", () => {

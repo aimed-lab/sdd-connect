@@ -191,7 +191,7 @@ export default function AnnouncementsTab({
   role: string;
   isSiteAdmin: boolean;
   updates: ProjectUpdate[];
-  /** ColaboFest: announcements only (no "Ask for help" and no help requests). */
+  /** CollaboFest: announcements only (no "Ask for help" and no help requests). */
   simple?: boolean;
   /** Open the announcement form on arrival ("Post announcement" from the "+" sheet). */
   startCreating?: boolean;

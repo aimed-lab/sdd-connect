@@ -41,8 +41,8 @@ export async function POST(req: Request) {
   }
   const project = result.project;
 
-  // The agent now runs on ColaboFest projects too — resources only, no
-  // checklist. A ColaboFest project comes pre-filled with SPARC's own nine
+  // The agent now runs on CollaboFest projects too — resources only, no
+  // checklist. A CollaboFest project comes pre-filled with SPARC's own nine
   // readiness items, and proposing six more of ours on top is what Chen
   // meant by overwhelming it; resource discovery has no such conflict, so
   // it's no longer withheld. `challenge_key` is forwarded to the backend

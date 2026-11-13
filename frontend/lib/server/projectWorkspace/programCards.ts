@@ -1,4 +1,4 @@
-// lib/server/projectWorkspace/programCards.ts: the pure rules behind the ColaboFest
+// lib/server/projectWorkspace/programCards.ts: the pure rules behind the CollaboFest
 // project cards on /programs/colabofest-2026 and the order of the cards there and on
 // /projects: the project code, finalists first, which task rows a card shows, the one
 // status line and the warning badge. No next/* imports, so `npm test` covers it.
@@ -11,7 +11,7 @@ import { formatDay } from "../pages/pageViewHelpers.ts";
 
 // ── code and order ───────────────────────────────────────────────────────────
 
-/** The project code ("C-108") from the description line ("ColaboFest 2026 · C-108"), or null. */
+/** The project code ("C-108") from the description line ("CollaboFest 2026 · C-108"), or null. */
 export function projectCode(description: string | null | undefined): string | null {
   return (description ?? "").match(/\bC-\d+\b/)?.[0] ?? null;
 }
@@ -31,7 +31,7 @@ export function sortProgramCards<T extends { finalist: boolean; code: string | n
   );
 }
 
-/** /projects: ColaboFest finalists first, then the other ColaboFest projects by code,
+/** /projects: CollaboFest finalists first, then the other CollaboFest projects by code,
  *  then every other project in the order it came in. */
 export function sortMyProjects<T extends { inProgram: boolean; finalist: boolean; code: string | null; name: string }>(projects: T[]): T[] {
   const program = sortProgramCards(projects.filter((p) => p.inProgram).map((p) => ({ ...p, finalist: p.finalist })));

@@ -1228,7 +1228,7 @@ async def project_agent_http(request):
     Runs the fixed pipeline in tools/project_agent.py: search (reusing
     explore_async, plus two direct status-filtered trial searches for the
     digest, all in parallel) -> digest render -> relevance pass -> checklist
-    proposal (skipped for a ColaboFest project). No timeout here on purpose —
+    proposal (skipped for a CollaboFest project). No timeout here on purpose —
     this container has none, unlike the Vercel function that would otherwise
     have to run it (see CLAUDE.md's architecture note). Never 500s the
     caller: on total failure it returns an explained empty proposal with

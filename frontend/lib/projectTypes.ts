@@ -55,7 +55,7 @@ export const COLABOFEST_CHALLENGE_KEY = "colabofest_2026";
 
 // The PROGRAM a project belongs to: projects.program (2026-10-31_project_program.sql).
 // Not the registration flow above: a winning team is in the program without ever
-// having registered, so it gets the ColaboFest project home (Welcome card, Box
+// having registered, so it gets the CollaboFest project home (Welcome card, Box
 // folder, Progress, finalist, affiliation, the program view) but no Proposal tab,
 // submission status or deadline. Only a site admin can set it. This is the ONE
 // constant for that value; use it, never the literal.
@@ -74,7 +74,7 @@ export type MyProjectSummary = {
   challenge_key: string | null;
   /** The program the project is in (projects.program), or null. */
   program: string | null;
-  /** A ColaboFest finalist (projects.finalist). */
+  /** A CollaboFest finalist (projects.finalist). */
   finalist: boolean;
   proposal_submitted: boolean;
 };

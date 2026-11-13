@@ -1,8 +1,8 @@
-// ColaboFest 2026 projects — /programs/colabofest-2026.
+// CollaboFest 2026 projects — /programs/colabofest-2026.
 //
-// For anyone who is a lead or manager on at least one ColaboFest project (the
-// program manager across the ColaboFest projects, and each team's leads). Lists
-// the ColaboFest projects the viewer is a member of, finalists first and then by
+// For anyone who is a lead or manager on at least one CollaboFest project (the
+// program manager across the CollaboFest projects, and each team's leads). Lists
+// the CollaboFest projects the viewer is a member of, finalists first and then by
 // project code, one card each: the code, a Finalist badge, any warning badge,
 // the title, team size, the task lists that have items, one status line (tasks
 // and the last announcement) and links to the project and its announcements.
@@ -20,7 +20,7 @@ import { STALE_ANNOUNCEMENT_LABEL, programCountLine, type TaskStatus } from "@/l
 import { tabHref } from "@/lib/server/projectWorkspace/workspace";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "ColaboFest 2026 projects | SmartDrugDiscovery", robots: { index: false } };
+export const metadata: Metadata = { title: "CollaboFest 2026 projects | SmartDrugDiscovery", robots: { index: false } };
 
 // The tasks part of the status line: red-brown when overdue, amber when due today.
 const TASK_TONE: Record<TaskStatus["tone"], string> = {
@@ -60,15 +60,15 @@ export default async function ColabofestProgramPage() {
         Your projects
       </Link>
       <PageHeader
-        title="ColaboFest 2026 projects"
-        subtitle="How each ColaboFest project is doing: tasks, due dates and the latest announcements, in one place."
+        title="CollaboFest 2026 projects"
+        subtitle="How each CollaboFest project is doing: tasks, due dates and the latest announcements, in one place."
         statsLine={result.cards.length > 0 ? programCountLine(result.cards.length, finalists) : undefined}
       />
 
       {result.cards.length === 0 ? (
         <div className="tile p-8 max-w-xl" style={{ background: "var(--type-other-bg)" }}>
           <p className="font-body-md text-body-md text-secondary">
-            No ColaboFest projects yet. When a team is added as a ColaboFest 2026 project and you are on it, it shows up here.
+            No CollaboFest projects yet. When a team is added as a CollaboFest 2026 project and you are on it, it shows up here.
           </p>
         </div>
       ) : (

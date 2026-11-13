@@ -1,6 +1,6 @@
-// lib/server/projectWorkspace/program.ts — the ColaboFest 2026 program view.
+// lib/server/projectWorkspace/program.ts — the CollaboFest 2026 program view.
 //
-// A lead or manager of at least one ColaboFest project sees every ColaboFest
+// A lead or manager of at least one CollaboFest project sees every CollaboFest
 // project they are a member of, one card each. Everything is read through the
 // caller's own session, so row-level security decides what comes back (a member
 // sees their own projects' rows and nobody else's); there are no service-role

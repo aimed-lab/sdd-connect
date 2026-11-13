@@ -184,7 +184,7 @@ export default function MembersSection({
 }: {
   /** Plain mode: how many members have no name yet; one gray line counts them. */
   notSignedIn?: number;
-  /** Name, avatar and affiliation only, in one flat list (the invite-only ColaboFest community). */
+  /** Name, avatar and affiliation only, in one flat list (the invite-only CollaboFest community). */
   plain?: boolean;
   /** Open the viewer's own focus editor on load (?editFocus=1). */
   editFocusOnLoad?: boolean;

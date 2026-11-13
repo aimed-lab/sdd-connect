@@ -31,7 +31,7 @@ function oneLine(raw: unknown): string {
 // ── dates (US Central) ───────────────────────────────────────────────────────
 // Teams are at UAB, so the dates a team page shows (when an update or reply
 // was posted) and "today" for Tasks (Today / Tomorrow / Overdue) are in US
-// Central time, the way the ColaboFest project home decides "today"
+// Central time, the way the CollaboFest project home decides "today"
 // (lib/server/projectWorkspace/status.ts todayIso). Before this, they were
 // UTC: at 6 PM Central on Nov 11 everything already read "Nov 12".
 

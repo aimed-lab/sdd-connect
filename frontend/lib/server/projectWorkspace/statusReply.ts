@@ -9,7 +9,7 @@ export function projectStatusQuestion(text: string): { matches: boolean; colabof
   const asks =
     /\b(?:status|progress|how(?:'s| is| are)|update on|updates on|where (?:are|do) we)\b[^.?!]{0,60}\b(?:my|our)\b[^.?!]{0,30}\bprojects?\b/i.test(t) ||
     /\b(?:my|our)\b[^.?!]{0,30}\bprojects?\b[^.?!]{0,30}\b(?:status|progress|doing)\b/i.test(t);
-  return { matches: asks, colabofestOnly: asks && /colabo\s*fest/i.test(t) };
+  return { matches: asks, colabofestOnly: asks && /coll?abo\s*fest/i.test(t) }; // the right spelling, CollaboFest, and the old ColaboFest people may still type
 }
 
 type ReplyStatus = ReturnType<typeof buildProjectStatus>;
@@ -18,7 +18,7 @@ type ReplyStatus = ReturnType<typeof buildProjectStatus>;
 export function formatStatusReply(statuses: ReplyStatus[], opts: { colabofestOnly?: boolean; total?: number } = {}): string {
   if (statuses.length === 0) {
     return opts.colabofestOnly
-      ? "You are not on any ColaboFest 2026 projects yet."
+      ? "You are not on any CollaboFest 2026 projects yet."
       : "You are not on any projects yet. Open Projects and click New project to start one.";
   }
   const blocks = statuses.map((s) => {

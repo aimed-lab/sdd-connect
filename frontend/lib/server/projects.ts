@@ -186,7 +186,7 @@ export type ProjectDetail = {
   deadline: string | null;
   challenge_key: string | null;
   // The program the project is in (projects.program), or null. Drives the
-  // ColaboFest project home; challenge_key drives the registration flow.
+  // CollaboFest project home; challenge_key drives the registration flow.
   program: string | null;
   target: string | null;
   indication: string | null;
@@ -207,7 +207,7 @@ export type ProjectDetail = {
   viewer_role: "lead" | "manager" | "member";
   // The project's GitHub link (2026-10-27_project_github_url.sql), or null.
   github_url: string | null;
-  // A ColaboFest finalist (2026-10-31_colabofest_project_core.sql). Only a site
+  // A CollaboFest finalist (2026-10-31_colabofest_project_core.sql). Only a site
   // admin changes it.
   finalist: boolean;
   members: ProjectMember[];

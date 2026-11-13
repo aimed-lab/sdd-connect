@@ -1,4 +1,4 @@
-// The Overview tab. Middle column, top to bottom: the Welcome card (ColaboFest,
+// The Overview tab. Middle column, top to bottom: the Welcome card (CollaboFest,
 // until dismissed), the Box folder card, the newest Announcements and the newest
 // Discussions. Right column: Progress (the SPARC and Southern Research
 // checklists) and Team. On a phone it is one column in this order: Welcome, Box,
@@ -79,7 +79,7 @@ export default function OverviewTab({
 }: {
   projectId: string;
   isColabofest: boolean;
-  /** The Welcome card is still wanted (ColaboFest and not dismissed). */
+  /** The Welcome card is still wanted (CollaboFest and not dismissed). */
   showWelcome: boolean;
   firstName: string;
   today: string;

@@ -31,7 +31,7 @@ for (const text of CREATE) {
 
 test("team intent: a name after called / named is filled in", () => {
   assert.deepEqual(detectTeamIntent("start a team called Lung Lab"), { kind: "create", name: "Lung Lab" });
-  assert.deepEqual(detectTeamIntent('Create a team named "ColaboFest 2026"!'), { kind: "create", name: "ColaboFest 2026" });
+  assert.deepEqual(detectTeamIntent('Create a team named "CollaboFest 2026"!'), { kind: "create", name: "CollaboFest 2026" });
   assert.deepEqual(detectTeamIntent("make me a team called   My  Team "), { kind: "create", name: "My Team" });
 });
 

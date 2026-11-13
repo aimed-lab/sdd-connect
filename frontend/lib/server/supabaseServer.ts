@@ -35,7 +35,7 @@ export const getSessionClient = getRouteClient;
 // browser). Callers: lib/auth.ts's deleteAccount(), and getPublicPinnedLink() in
 // lib/server/communities.ts (one read-only select of a community's pinned LINK,
 // when an admin opted in), and lib/server/colabofestCommunity.ts (two read-only
-// selects for the invite-only ColaboFest community: everyone in it, and its project
+// selects for the invite-only CollaboFest community: everyone in it, and its project
 // titles, run only after the page has checked the viewer is a member). If another caller ever appears, that is the signal
 // something is being done with the wrong trust level. Returns null when unconfigured so the caller answers 500.
 export function getServiceRoleClient() {

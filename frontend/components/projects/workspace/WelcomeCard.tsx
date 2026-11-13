@@ -1,6 +1,6 @@
 "use client";
 
-// The Welcome card on a ColaboFest project's Overview, shown until this person
+// The Welcome card on a CollaboFest project's Overview, shown until this person
 // presses "Dismiss" (stored per person and project in the database). The dates
 // and labels come from lib/colabofestConfig.ts.
 
@@ -45,7 +45,7 @@ export default function WelcomeCard({ projectId, firstName, today }: { projectId
     <section className="rounded-2xl border border-outline-variant bg-surface-container-low p-5 sm:p-6 flex flex-col gap-4" aria-label="Welcome">
       <div className="flex items-start justify-between gap-3">
         <h2 className="font-title text-[22px] leading-snug font-medium text-on-background">
-          Welcome to your ColaboFest project, {firstName}
+          Welcome to your CollaboFest project, {firstName}
         </h2>
         <button
           type="button"

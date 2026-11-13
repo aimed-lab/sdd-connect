@@ -80,7 +80,7 @@ export const TOOL_SPECS: ToolSpec[] = [
   tool({
     name: "list_my_projects",
     description:
-      "List the projects the researcher is on (their team projects, such as ColaboFest 2026 projects): name, label, their role and team size. " +
+      "List the projects the researcher is on (their team projects, such as CollaboFest 2026 projects): name, label, their role and team size. " +
       "Use it to answer 'what projects am I on' and to find a project_id for get_project_status. Read-only.",
     input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
     needs_user_token: true,

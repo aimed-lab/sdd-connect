@@ -49,11 +49,11 @@ export function tabHref(projectId: string, tab: TabKey): string {
 }
 
 const CHALLENGE_LABEL: Record<string, string> = {
-  colabofest_2026: "ColaboFest 2026",
+  colabofest_2026: "CollaboFest 2026",
 };
 
 /** The small label under the project name: the challenge it is entered in
- *  (e.g. "ColaboFest 2026"), or null for an ordinary project. */
+ *  (e.g. "CollaboFest 2026"), or null for an ordinary project. */
 export function projectLabel(challengeKey: string | null | undefined): string | null {
   const k = (challengeKey ?? "").trim();
   if (!k) return null;

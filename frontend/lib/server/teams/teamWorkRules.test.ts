@@ -175,7 +175,7 @@ test("teamToday: an evening in US Central is still that day (not UTC's tomorrow)
   assert.equal(teamToday(new Date("2026-11-12T06:05:00Z")), "2026-11-12");
 });
 
-test("teamToday decides 'today' the same way the ColaboFest project home does", () => {
+test("teamToday decides 'today' the same way the CollaboFest project home does", () => {
   for (const iso of ["2026-11-12T00:30:00Z", "2026-11-12T05:59:00Z", "2026-11-12T06:00:00Z", "2026-07-04T03:00:00Z"]) {
     assert.equal(teamToday(new Date(iso)), todayIso(new Date(iso)), iso);
   }

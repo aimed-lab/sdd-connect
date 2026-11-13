@@ -23,7 +23,7 @@
 // top edge instead of overlapping it, and drops back to a normal 24px
 // corner offset everywhere else on the page.
 //
-// AVAILABLE ON EVERY PROJECT, including ColaboFest — unlike AgentSection
+// AVAILABLE ON EVERY PROJECT, including CollaboFest — unlike AgentSection
 // (hidden there because it pushes proposals), this is pull-based: a member
 // asks, nothing is proposed unprompted.
 //

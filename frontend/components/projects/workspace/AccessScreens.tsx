@@ -42,8 +42,8 @@ export function SignInGate({ returnPath }: { returnPath: string }) {
   const { busy, error, go } = useStart(() => ssoLoginAction(returnPath));
   return (
     <Shell>
-      <h1 className="font-headline-md text-headline-md text-on-background">Sign in to open your ColaboFest project</h1>
-      <p className="font-body-md text-body-md text-secondary">Use the email address you used for your ColaboFest submission.</p>
+      <h1 className="font-headline-md text-headline-md text-on-background">Sign in to open your CollaboFest project</h1>
+      <p className="font-body-md text-body-md text-secondary">Use the email address you used for your CollaboFest submission.</p>
       {error && (
         <p className="font-body-sm text-body-sm text-error" role="alert">
           {error}
@@ -84,7 +84,7 @@ export function RestrictedAccess({
         ) : (
           "You are signed in."
         )}{" "}
-        If this is your project, make sure you signed in with the email from your ColaboFest submission.
+        If this is your project, make sure you signed in with the email from your CollaboFest submission.
       </p>
       {error && (
         <p className="font-body-sm text-body-sm text-error" role="alert">

@@ -79,7 +79,7 @@ test("timeline: the next date", () => {
   assert.equal(nextTimelineDate("2027-06-01"), null);
 });
 
-test("the ColaboFest page: finalists only for tasks, Discussions gone, access check kept, other projects untouched", () => {
+test("the CollaboFest page: finalists only for tasks, Discussions gone, access check kept, other projects untouched", () => {
   const page = src("app/projects/[id]/page.tsx");
   assert.match(page, /hasProjectMemberRow\(db, id, user\.id\)/);
   assert.match(page, /const isColabofest = project\.program === COLABOFEST_PROGRAM;/);
@@ -121,10 +121,10 @@ test("the hero's small label is the project's description line", () => {
   const page = src("app/projects/[id]/page.tsx");
   assert.match(page, /label=\{heroLabel\(project\.description\)\}/);
   const colab = src("components/projects/workspace/ColabofestProject.tsx");
-  assert.match(colab, /\(label \|\| "ColaboFest 2026"\)\.toUpperCase\(\)/);
+  assert.match(colab, /\(label \|\| "CollaboFest 2026"\)\.toUpperCase\(\)/);
 });
 
-test("ColaboFest project page: My projects link in the top row, no floating chat button; other projects keep it", () => {
+test("CollaboFest project page: My projects link in the top row, no floating chat button; other projects keep it", () => {
   const colab = src("components/projects/workspace/ColabofestProject.tsx");
   assert.match(colab, /href="\/projects"/);
   assert.match(colab, /Welcome, \{firstName\}/);
