@@ -1,6 +1,6 @@
 "use client";
 
-// The Media section: attach/remove images and slide decks. Two callers:
+// The Media section: attach/remove files and label them. Two callers:
 //   - components/promote/SubmitFlow.tsx's manual form — there is NO row yet
 //     when this mounts (a row is created lazily, on first input anywhere in
 //     the form). `ensureShowcaseId` is how this gets one on demand: it's
@@ -10,17 +10,18 @@
 //     exists (paper path post-generation, or the edit route); its
 //     `ensureShowcaseId` is trivial, just resolving to that id.
 //
-// The lead sentence in the helper text is category-specific (a poster
-// prompts differently than a tool screenshot); the accepted types and size
-// limit after it never change, since those are the same for every category.
+// The upload itself (direct to Storage, resumable, then recorded server
+// side) lives in useFileUploads.ts, shared with the "Share a file" screen.
+//
+// Any file type is accepted. Images (PNG, JPEG, WebP, GIF) are shown in the
+// article; PDF/PPTX stay "slides"; everything else is a "file". Slides and
+// files are listed on the item page for download only.
 
-import { useEffect, useRef, useState } from "react";
-import { addShowcaseMediaAction, removeShowcaseMediaAction } from "@/app/promote/actions";
+import { useRef } from "react";
+import UploadRow from "@/components/promote/UploadRow";
+import { useFileUploads } from "@/components/promote/useFileUploads";
+import { MAX_MEDIA_BYTES, formatFileSize } from "@/lib/server/promote/mediaFiles";
 import type { ShowcaseMedia, ShowcaseType } from "@/lib/showcaseTypes";
-
-const MAX_MEDIA_BYTES = 50 * 1024 * 1024;
-const MEDIA_ACCEPT =
-  "image/png,image/jpeg,image/webp,image/gif,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
 const MEDIA_HINT: Record<ShowcaseType, string> = {
   paper: "A figure, chart, or a copy of the poster or slides, if you have one.",
@@ -45,10 +46,8 @@ export default function MediaUploader({
 }: {
   /** Resolves to the showcase_id to upload against, creating the draft row
    *  first if one doesn't exist yet. Called lazily — only when a file is
-   *  actually picked — and memoized locally (via showcaseIdRef below) so a
-   *  multi-file selection or several uploads in a row only ever resolves
-   *  once. Throws if the row can't be created/found, which uploadFile below
-   *  turns into a normal mediaError rather than an unhandled rejection. */
+   *  actually picked — and only once. Throws if the row can't be
+   *  created/found, which becomes a normal error message. */
   ensureShowcaseId: () => Promise<string>;
   /** Drives only the helper text's lead sentence — reactive, so changing
    *  the Type dropdown in ArticleEditor (or SubmitFlow's manual form)
@@ -57,75 +56,11 @@ export default function MediaUploader({
   initialMedia: ShowcaseMedia[];
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const showcaseIdRef = useRef<string | null>(null);
-  const [media, setMedia] = useState<ShowcaseMedia[]>(initialMedia);
-  const [uploading, setUploading] = useState(false);
-  const [mediaError, setMediaError] = useState<string | null>(null);
+  const uploads = useFileUploads({ ensureShowcaseId, initialMedia });
 
-  const resolveShowcaseId = async (): Promise<string> => {
-    if (showcaseIdRef.current) return showcaseIdRef.current;
-    const id = await ensureShowcaseId();
-    showcaseIdRef.current = id;
-    return id;
-  };
-
-  // If there's already attached media, a row obviously already exists —
-  // resolve it up front so Remove works on one of THESE before the user has
-  // uploaded anything new this session. Harmless to call eagerly here
-  // specifically because it only ever runs when initialMedia is non-empty,
-  // and BOTH callers only pass a non-empty initialMedia for an entry that
-  // already exists (SubmitFlow's fresh form always passes []) — so this can
-  // never be what creates a draft on page load.
-  useEffect(() => {
-    if (initialMedia.length > 0) {
-      resolveShowcaseId().catch(() => {
-        // A failed resolve here just means Remove won't work until a
-        // successful upload resolves it instead — not worth an error
-        // banner before the user has done anything.
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const uploadFile = async (file: File) => {
-    setMediaError(null);
-    if (file.size > MAX_MEDIA_BYTES) {
-      setMediaError(`"${file.name}" is over 50 MB.`);
-      return;
-    }
-
-    setUploading(true);
-    try {
-      const showcaseId = await resolveShowcaseId();
-      const fd = new FormData();
-      fd.set("showcaseId", showcaseId);
-      fd.set("file", file);
-      const res = await addShowcaseMediaAction(fd);
-      if (res.ok) setMedia((m) => [...m, res.media]);
-      else setMediaError(res.error);
-    } catch (e) {
-      setMediaError(e instanceof Error ? e.message : "Couldn't attach that file. Please try again.");
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const uploadFiles = async (files: FileList | null) => {
-    for (const file of Array.from(files ?? [])) await uploadFile(file);
+  const pickFiles = (files: FileList | null) => {
+    uploads.addFiles(Array.from(files ?? []));
     if (fileRef.current) fileRef.current.value = "";
-  };
-
-  const removeMedia = async (mediaId: string) => {
-    // A row that has never been resolved has never uploaded anything
-    // either — `media` would be empty and this button unreachable — but
-    // guard anyway rather than calling the action with a null id.
-    const showcaseId = showcaseIdRef.current;
-    if (!showcaseId) return;
-
-    setMediaError(null);
-    const res = await removeShowcaseMediaAction(showcaseId, mediaId);
-    if (res.ok) setMedia((m) => m.filter((x) => x.id !== mediaId));
-    else setMediaError(res.error);
   };
 
   return (
@@ -133,63 +68,41 @@ export default function MediaUploader({
       <div>
         <h2 className="font-headline-md text-lg text-on-background">Media</h2>
         <p className="mt-1 font-body-sm text-body-sm text-secondary">
-          {MEDIA_HINT[type]} PNG, JPEG, WebP, GIF, PDF or PPTX, up to 50 MB
-          each. Add as many as you like.
+          {MEDIA_HINT[type]} Any file type, up to {formatFileSize(MAX_MEDIA_BYTES)} each. Images
+          appear in the article; other files are listed for download.
         </p>
       </div>
 
-      {media.length > 0 && (
-        <ul className="space-y-2">
-          {media.map((m) => (
-            <li
-              key={m.id}
-              className="flex items-center justify-between gap-3 rounded-lg border border-outline-variant/40 bg-surface-container-lowest px-4 py-3"
-            >
-              <span className="flex items-center gap-2 min-w-0">
-                <span className="material-symbols-outlined text-primary text-base shrink-0">
-                  {m.kind === "image" ? "image" : "slideshow"}
-                </span>
-                <span className="font-body-sm text-body-sm text-on-background truncate">
-                  {m.filename}
-                </span>
-                <span className="font-label-sm text-label-sm text-secondary shrink-0">
-                  {(m.sizeBytes / 1024 / 1024).toFixed(1)} MB
-                </span>
-              </span>
-              <button
-                type="button"
-                onClick={() => removeMedia(m.id)}
-                className="shrink-0 font-label-sm text-label-sm text-error hover:underline"
-              >
-                Remove
-              </button>
-            </li>
+      {uploads.items.length > 0 && (
+        <ul className="space-y-2" aria-live="polite">
+          {uploads.items.map((item) => (
+            <UploadRow
+              key={item.key}
+              item={item}
+              labelPlaceholder="Optional label, e.g. External evaluation set used in Table 3"
+              onLabelChange={(v) => uploads.setLabel(item.key, v)}
+              onLabelCommit={() => uploads.commitLabel(item.key)}
+              onRemove={() => void uploads.remove(item.key)}
+              onResume={() => uploads.resume(item.key)}
+            />
           ))}
         </ul>
       )}
 
-      {mediaError && (
+      {uploads.error && (
         <p className="font-body-sm text-body-sm text-error" role="alert">
-          {mediaError}
+          {uploads.error}
         </p>
       )}
 
       <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-outline-variant/50 rounded-xl py-8 cursor-pointer hover:bg-surface-container-low transition-all">
         <span className="material-symbols-outlined text-2xl text-primary">
-          {uploading ? "hourglass_top" : "upload"}
+          {uploads.busy ? "hourglass_top" : "upload"}
         </span>
         <span className="font-label-md text-label-md text-on-background">
-          {uploading ? "Uploading…" : "Add a file"}
+          {uploads.busy ? "Uploading… you can add more" : "Add a file"}
         </span>
-        <input
-          ref={fileRef}
-          type="file"
-          accept={MEDIA_ACCEPT}
-          multiple
-          disabled={uploading}
-          onChange={(e) => uploadFiles(e.target.files)}
-          className="sr-only"
-        />
+        <input ref={fileRef} type="file" multiple onChange={(e) => pickFiles(e.target.files)} className="sr-only" />
       </label>
     </section>
   );

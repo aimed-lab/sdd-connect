@@ -23,8 +23,26 @@ import {
   type Db,
 } from "@/lib/auth";
 import { getAnonServerClient } from "@/lib/server/supabaseServer";
+import { cleanPaperYear } from "@/lib/server/promote/quickShare";
+import { canRemoveFile } from "@/lib/server/promote/manageFile";
+import {
+  MAX_MEDIA_BYTES,
+  cleanMediaLabel,
+  displayFileName,
+  formatFileSize,
+  isMediaObjectPathFor,
+  isUuid,
+  mediaKindFor,
+} from "@/lib/server/promote/mediaFiles";
 import type { ArticleEditorEntry } from "@/components/promote/ArticleEditor";
-import { articleUrl } from "@/lib/articleFormat";
+import { SITE_URL } from "@/lib/articleFormat";
+import {
+  itemUrlFor,
+  linkedPaperTitle,
+  listedInRecentlyShared,
+  listedInYourFiles,
+  listedOnPromote,
+} from "@/lib/server/promote/itemAddress";
 import {
   canonicalType,
   factsForRow,
@@ -227,15 +245,22 @@ export async function listShowcase(
 
   // The type filter is applied here, on the mapped type, so an older row (an
   // "award") still shows under its current chip ("Achievement").
-  const { data, error } = await db
-    .from("promote_showcase")
-    .select(ENTRY_SELECT)
-    .eq("published", true)
-    .order("created_at", { ascending: false });
+  // File shares (/files) are never in the Promote feed. Before the
+  // is_file_share column exists there are none to leave out.
+  const { data, error } = await withOptionalColumns(["is_file_share"], (present) => {
+    let q = db
+      .from("promote_showcase")
+      .select(present.length ? `${ENTRY_SELECT}, is_file_share` : ENTRY_SELECT)
+      .eq("published", true);
+    if (present.length) q = q.eq("is_file_share", false);
+    return q.order("created_at", { ascending: false });
+  });
   if (error || !data) return [];
 
-  const rows = (data as Record<string, unknown>[]).filter((r) =>
-    matchesType(r.type as string | null, opts.type ?? "all")
+  const rows = (data as unknown as Record<string, unknown>[]).filter(
+    (r) =>
+      listedOnPromote({ published: true, is_file_share: r.is_file_share as boolean | undefined }) &&
+      matchesType(r.type as string | null, opts.type ?? "all")
   );
   await attachCommunities(rows);
   const viewer = await getCurrentUser();
@@ -476,12 +501,17 @@ export async function isSiteAdmin(): Promise<boolean> {
 async function ensureShareText(id: string): Promise<void> {
   try {
     const { user, db } = await requireCurrentUser();
-    const { data } = await db
-      .from("promote_showcase")
-      .select("type, headline, standfirst, article_body, tags, key_facts, linkedin_post, share_text, slug")
-      .eq("id", id)
-      .eq("owner_id", user.id)
-      .maybeSingle();
+    const { data: row } = await withOptionalColumns(["is_file_share"], (present) =>
+      db
+        .from("promote_showcase")
+        .select(
+          ["type, headline, standfirst, article_body, tags, key_facts, linkedin_post, share_text, slug", ...present].join(", ")
+        )
+        .eq("id", id)
+        .eq("owner_id", user.id)
+        .maybeSingle()
+    );
+    const data = row as unknown as Record<string, unknown> | null;
     if (!data || !(data.headline as string)?.trim()) return;
     const current = normalizeShareTexts(data.share_text);
     if (current.linkedin.trim() && current.x.trim() && current.bluesky.trim()) return;
@@ -492,7 +522,7 @@ async function ensureShareText(id: string): Promise<void> {
       standfirst: (data.standfirst as string) ?? "",
       facts: factsForRow(type, data.key_facts),
       tags: (data.tags as string[]) ?? [],
-      url: articleUrl(data.slug as string),
+      url: itemUrlFor(SITE_URL, data.slug as string, data.is_file_share === true),
     });
     const next: ShareTexts = {
       linkedin: current.linkedin.trim() || ((data.linkedin_post as string) ?? "").trim() || draft.linkedin,
@@ -534,7 +564,8 @@ async function regenerateSlugFromHeadline(
   db: Db,
   id: string,
   userId: string,
-  headline: string
+  headline: string,
+  title: string = headline
 ): Promise<string | null> {
   const base = slugifyTitle(headline);
   const MAX_ATTEMPTS = 5;
@@ -542,7 +573,7 @@ async function regenerateSlugFromHeadline(
     const slug = attempt === 0 ? base : `${base}-${randomSlugSuffix()}`;
     const { error } = await db
       .from("promote_showcase")
-      .update({ title: headline, slug })
+      .update({ title, slug })
       .eq("id", id)
       .eq("owner_id", userId);
     if (!error) return slug;
@@ -565,6 +596,16 @@ export class EmptyArticleError extends Error {
     super(message);
     this.name = "EmptyArticleError";
   }
+}
+
+/** True when the item has at least one attached file (any kind). */
+async function hasAttachedFile(db: Db, showcaseId: string): Promise<boolean> {
+  const { data } = await db
+    .from("promote_showcase_media")
+    .select("id")
+    .eq("showcase_id", showcaseId)
+    .limit(1);
+  return (data?.length ?? 0) > 0;
 }
 
 /** Flip published on/off as the owner. Nothing is public until this has been
@@ -607,7 +648,10 @@ export async function setArticlePublished(id: string, published: boolean): Promi
 
   if (published) {
     const headline = (data?.headline as string | undefined)?.trim() ?? "";
-    const hasContent = Boolean(headline && (data?.article_body as string | undefined)?.trim());
+    const hasBody = Boolean((data?.article_body as string | undefined)?.trim());
+    // A body is not needed when the item carries at least one file: that is
+    // a download page ("Share a file", /share), not an article.
+    const hasContent = Boolean(headline && (hasBody || (await hasAttachedFile(db, id))));
     if (!hasContent) throw new EmptyArticleError();
 
     const title = (data?.title as string | undefined) ?? "";
@@ -690,28 +734,194 @@ export async function deleteShowcaseEntry(entryId: string): Promise<void> {
   }
 }
 
+// ── "Share a file" (/share) ─────────────────────────────────────────
+
+/** Thrown by shareFileItem for input it refuses. The message is safe to show. */
+export class ShareFileError extends Error {}
+
+const SHARE_ITEM_TYPES: readonly ShowcaseType[] = ["dataset", "talk", "tool", "other"];
+
+export type ShareFilePaper = {
+  title: string;
+  authors: string[];
+  journal: string | null;
+  doi: string | null;
+  link: string | null;
+  /** Year the paper was published; optional. */
+  year?: number | null;
+};
+
+/** Publish a "Share a file" item in one step, as its owner. The headline is
+ *  the title the person typed. With a paper, the item's `title` column holds
+ *  the paper's title (as on the DOI path) and doi / journal / authors / link
+ *  hold the rest; without one, `title` is the headline and those stay empty.
+ *  The slug is rebuilt from the headline the first time the item goes live
+ *  (the draft's slug came from the filename). Publishing itself goes through
+ *  setArticlePublished, so the same rule applies: a headline and either a
+ *  body or at least one file. No AI step anywhere. */
+/** Write a file share's title, type and paper as its owner. Used by sharing
+ *  (shareFileItem) and by "Save changes" on the Manage screen
+ *  (updateFileShare). Only sharing marks the item as a file share. */
+async function saveFileShareFields(
+  db: Db,
+  userId: string,
+  input: { id: string; type: ShowcaseType; title: string; paper: ShareFilePaper | null },
+  markAsFileShare: boolean
+): Promise<{ published: boolean; headline: string; title: string }> {
+  const headline = (input.title ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+  if (!headline) throw new ShareFileError("Add a title.");
+  if (!SHARE_ITEM_TYPES.includes(input.type)) throw new ShareFileError("Choose what kind of file this is.");
+
+  const { data: row } = await db
+    .from("promote_showcase")
+    .select("id, published")
+    .eq("id", input.id)
+    .eq("owner_id", userId)
+    .maybeSingle();
+  if (!row) throw new ShareFileError("This file page could not be found.");
+
+  const p = input.paper;
+  const paperTitle = (p?.title ?? "").replace(/\s+/g, " ").trim().slice(0, 500);
+  const doi = (p?.doi ?? "").trim().slice(0, 200) || null;
+  const link = safeHttpUrl(p?.link ?? "") ?? (doi ? `https://doi.org/${doi}` : null);
+  const hasPaper = Boolean(paperTitle && (doi || link));
+  const title = hasPaper ? paperTitle : headline;
+
+  const fields: Record<string, unknown> = {
+    type: input.type,
+    headline,
+    title,
+    authors: hasPaper
+      ? (p?.authors ?? []).map((a) => String(a).trim()).filter(Boolean).join(", ").slice(0, 2000)
+      : "",
+    doi: hasPaper ? doi : null,
+    link: hasPaper ? link : null,
+    journal: hasPaper ? (p?.journal ?? "").trim().slice(0, 300) || null : null,
+    paper_year: hasPaper ? cleanPaperYear(p?.year) : null,
+  };
+  // The one place that marks an item as a file share (/files, not Promote):
+  // sharing it from /share.
+  if (markAsFileShare) fields.is_file_share = true;
+
+  const save = (f: Record<string, unknown>) =>
+    db.from("promote_showcase").update(f).eq("id", input.id).eq("owner_id", userId);
+  // A migration not run yet (paper_year, is_file_share): save without it.
+  const { error } = await withOptionalColumns(["paper_year", "is_file_share"], (present) => {
+    const f = { ...fields };
+    if (!present.includes("paper_year")) delete f.paper_year;
+    if (!present.includes("is_file_share")) delete f.is_file_share;
+    return save(f);
+  });
+  if (error) throw error;
+
+  return { published: row.published === true, headline, title };
+}
+
+export async function shareFileItem(input: {
+  id: string;
+  type: ShowcaseType;
+  title: string;
+  paper: ShareFilePaper | null;
+}): Promise<{ slug: string }> {
+  const { user, db } = await requireCurrentUser();
+  const saved = await saveFileShareFields(db, user.id, input, true);
+  if (!saved.published) await regenerateSlugFromHeadline(db, input.id, user.id, saved.headline, saved.title);
+  return setArticlePublished(input.id, true);
+}
+
+/** "Save changes" on the Manage screen: title, type and paper. Does not
+ *  change whether the page is public, nor its address. */
+export async function updateFileShare(input: {
+  id: string;
+  type: ShowcaseType;
+  title: string;
+  paper: ShareFilePaper | null;
+}): Promise<void> {
+  const { user, db } = await requireCurrentUser();
+  await saveFileShareFields(db, user.id, input, false);
+}
+
+/** A file share loaded for its owner's Manage screen (/files/<slug>/edit).
+ *  Null for a signed-out visitor, an unknown slug, or someone else's item,
+ *  all alike (the page 404s), same as getOwnedArticleForEdit. */
+export type OwnedFileShare = {
+  id: string;
+  slug: string;
+  isPublic: boolean;
+  isFileShare: boolean;
+  hasBody: boolean;
+  type: ShowcaseType;
+  title: string;
+  paper: {
+    title: string | null;
+    authors: string | null;
+    journal: string | null;
+    doi: string | null;
+    link: string | null;
+    paperYear: number | null;
+  };
+  media: ShowcaseMedia[];
+};
+
+export async function getOwnedFileShare(slug: string): Promise<OwnedFileShare | null> {
+  const user = await getCurrentUser();
+  if (!user) return null;
+  const db = await getDb();
+  if (!db) throw new ServerConfigError();
+
+  const { data: found, error } = await withOptionalColumns(["paper_year", "is_file_share"], (present) =>
+    db
+      .from("promote_showcase")
+      .select(
+        ["id, slug, type, headline, title, authors, journal, doi, link, article_body, published, owner_id", ...present].join(
+          ", "
+        )
+      )
+      .eq("slug", slug)
+      .maybeSingle()
+  );
+  const data = found as unknown as Record<string, unknown> | null;
+  if (error || !data || data.owner_id !== user.id) return null;
+
+  const media = await listShowcaseMedia(db, data.id as string);
+  return {
+    id: data.id as string,
+    slug: data.slug as string,
+    isPublic: data.published === true,
+    isFileShare: data.is_file_share === true,
+    hasBody: Boolean(((data.article_body as string) ?? "").trim()),
+    type: canonicalType(data.type as string),
+    title: ((data.headline as string) || (data.title as string) || "").trim(),
+    paper: {
+      title: (data.title as string | null) ?? null,
+      authors: (data.authors as string | null) ?? null,
+      journal: (data.journal as string | null) ?? null,
+      doi: (data.doi as string | null) ?? null,
+      link: (data.link as string | null) ?? null,
+      paperYear: cleanPaperYear(data.paper_year ?? null),
+    },
+    media,
+  };
+}
+
 // ── media attachments ────────────────────────────────────────────────────────
 //
-// Multiple files per article (images, slide decks), stored in the PRIVATE
-// showcase-media bucket at `<showcase_id>/<uuid>.<ext>` — the article's own
-// id as the folder, not the uploader's uid, which is what lets the storage
-// RLS policies key off promote_showcase.published (see the 2026-09-06
-// migrations). Every read mints a fresh signed URL; nothing here is ever a
-// stable/public link.
+// Any number of files per article, stored in the PRIVATE showcase-media
+// bucket under the article's own id: `<showcase_id>/<uuid>-<clean name>`
+// (older rows: `<showcase_id>/<uuid>.<ext>`). The article id as the first
+// folder, not the uploader's uid, is what lets the storage RLS policies key
+// off promote_showcase.published (see the 2026-09-06 migrations).
+//
+// The browser uploads straight to Storage (resumable, components/promote/
+// MediaUploader.tsx); the bytes never pass through a Server Action. Once the
+// upload is done, recordShowcaseMedia() below checks the object and writes
+// the row. Every read mints a fresh signed URL; the only stable link is the
+// per-file download route, /files/<slug>/download/<id>, for published items.
 
 export const SHOWCASE_MEDIA_BUCKET = "showcase-media";
 
-const MAX_MEDIA_BYTES = 50 * 1024 * 1024; // 50 MB — a routine slide deck is 20-50 MB
-const MEDIA_MIME_KIND: Record<string, MediaKind> = {
-  "image/png": "image",
-  "image/jpeg": "image",
-  "image/webp": "image",
-  "image/gif": "image",
-  "application/pdf": "slides",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "slides", // .pptx
-};
-
 const SIGNED_URL_TTL_SECONDS = 60 * 10; // 10 minutes, matches lib/server/projects.ts's proposal-file convention
+const DOWNLOAD_URL_TTL_SECONDS = 60; // the permanent link re-signs on every click
 
 /** Mint a short-lived signed URL for one object path. Throws if the calling
  *  client's role can't pass the bucket's SELECT policy for that path (an
@@ -725,6 +935,45 @@ async function signMediaPath(db: Db, path: string): Promise<string> {
   return data.signedUrl;
 }
 
+const MEDIA_COLUMNS = "id, kind, url, filename, size_bytes, label";
+const MEDIA_COLUMNS_BEFORE_LABEL = "id, kind, url, filename, size_bytes";
+
+/** A column a migration adds is not there yet: Postgres "undefined column"
+ *  (42703, on a select or filter) or PostgREST "column not in the schema
+ *  cache" (PGRST204, on an insert/update). Callers then fall back to working
+ *  without it, so nothing breaks between a deploy and running the file. */
+function isMissingColumn(error: { code?: string } | null): boolean {
+  return error?.code === "42703" || error?.code === "PGRST204";
+}
+
+type DbError = { code?: string; message?: string; details?: string } | null;
+
+/** Which of `optional` a missing-column error is about, or null when the
+ *  error is something else (or there is none). */
+function missingOptionalColumn(error: DbError, optional: readonly string[]): string | null {
+  if (!isMissingColumn(error)) return null;
+  const text = `${error?.message ?? ""} ${error?.details ?? ""}`;
+  return optional.find((c) => text.includes(c)) ?? null;
+}
+
+/** Run a query that uses some columns added by not-yet-run migrations
+ *  (paper_year, is_file_share). Each time the database says one of them is
+ *  missing, run again without it. */
+type LooseResult = { data: unknown; error: DbError };
+
+async function withOptionalColumns(
+  optional: readonly string[],
+  run: (present: string[]) => PromiseLike<LooseResult>
+): Promise<LooseResult> {
+  let present = [...optional];
+  for (;;) {
+    const res = await run(present);
+    const missing = missingOptionalColumn(res.error, present);
+    if (!missing) return res;
+    present = present.filter((c) => c !== missing);
+  }
+}
+
 /** List a showcase's attached media as signed URLs. Used both by the owner's
  *  own editor (called with the session client — covered by the "own" RLS
  *  policies) and by the public article page (called with the ANON client —
@@ -732,21 +981,22 @@ async function signMediaPath(db: Db, path: string): Promise<string> {
  *  way; Postgres RLS on both promote_showcase_media and storage.objects
  *  decides what the given client is actually allowed to see and sign. */
 export async function listShowcaseMedia(db: Db, showcaseId: string): Promise<ShowcaseMedia[]> {
-  const { data, error } = await db
-    .from("promote_showcase_media")
-    .select("id, kind, url, filename, size_bytes")
-    .eq("showcase_id", showcaseId)
-    .order("created_at", { ascending: true });
+  const query = (columns: string) =>
+    db
+      .from("promote_showcase_media")
+      .select(columns)
+      .eq("showcase_id", showcaseId)
+      .order("created_at", { ascending: true });
+
+  let { data, error } = await query(MEDIA_COLUMNS);
+  if (isMissingColumn(error)) ({ data, error } = await query(MEDIA_COLUMNS_BEFORE_LABEL));
   if (error || !data) return [];
 
   const withUrls = await Promise.all(
-    (data as Record<string, unknown>[]).map(async (row) => {
+    (data as unknown as Record<string, unknown>[]).map(async (row) => {
       try {
         return {
-          id: row.id as string,
-          kind: row.kind as MediaKind,
-          filename: row.filename as string,
-          sizeBytes: row.size_bytes as number,
+          ...mediaFromRow(row),
           url: await signMediaPath(db, row.url as string),
         };
       } catch {
@@ -757,28 +1007,87 @@ export async function listShowcaseMedia(db: Db, showcaseId: string): Promise<Sho
   return withUrls.filter((m): m is ShowcaseMedia => m !== null);
 }
 
-/** Attach one file to a showcase entry as its owner. Validates type/size in
- *  app code (belt-and-suspenders on top of the bucket's own
- *  allowed_mime_types/file_size_limit) and throws with a message the caller
- *  can show directly — unlike the old single-image uploadImage(), a failed
- *  attachment here is a real error the user needs to see and retry, not a
- *  silent "proceed without it" (there's no equivalent optional-image
- *  fallback once the user has explicitly chosen a file to attach). */
-export async function addShowcaseMedia(showcaseId: string, file: File): Promise<ShowcaseMedia> {
+function mediaFromRow(row: Record<string, unknown>): Omit<ShowcaseMedia, "url"> {
+  return {
+    id: row.id as string,
+    kind: row.kind as MediaKind,
+    filename: row.filename as string,
+    sizeBytes: Number(row.size_bytes),
+    label: (row.label as string | null | undefined) ?? null,
+  };
+}
+
+/** Thrown for anything about a reported upload that doesn't check out. The
+ *  message is safe to show to the user. */
+export class MediaRecordError extends Error {}
+
+/** Record a file the browser has ALREADY uploaded to Storage, as the owner of
+ *  the showcase. Nothing the browser says about the file is trusted except
+ *  its original name (for display):
+ *    - the path must be one buildMediaObjectPath() makes for THIS showcase;
+ *    - the caller must own the showcase (checked here, and again by the
+ *      insert RLS policy). Only the showcase's owner can write into its
+ *      folder at all (storage policy showcase_media_owner_insert), so an
+ *      object in that folder of a showcase the caller owns is the caller's;
+ *    - the object must really exist: its size and content type are read from
+ *      Storage, never from the browser;
+ *    - an object over the size limit, or empty, is deleted and refused. */
+export async function recordShowcaseMedia(input: {
+  showcaseId: string;
+  path: string;
+  filename: string;
+}): Promise<ShowcaseMedia> {
   const { user, db } = await requireCurrentUser();
+  const { showcaseId, path } = input;
 
-  const kind = MEDIA_MIME_KIND[file.type];
-  if (!file || file.size === 0) throw new Error("No file selected.");
-  if (!kind) throw new Error("Use PNG, JPEG, WebP, GIF, PDF or PPTX.");
-  if (file.size > MAX_MEDIA_BYTES) throw new Error("File must be under 50 MB.");
+  if (!isUuid(showcaseId) || !isMediaObjectPathFor(path, showcaseId)) {
+    throw new MediaRecordError("That upload doesn't belong to this item.");
+  }
 
-  const ext = (file.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "");
-  const path = `${showcaseId}/${crypto.randomUUID()}.${ext || "bin"}`;
+  const { data: item } = await db
+    .from("promote_showcase")
+    .select("id")
+    .eq("id", showcaseId)
+    .eq("owner_id", user.id)
+    .maybeSingle();
+  if (!item) throw new MediaRecordError("That upload doesn't belong to this item.");
 
-  const { error: uploadError } = await db.storage
-    .from(SHOWCASE_MEDIA_BUCKET)
-    .upload(path, file, { contentType: file.type, upsert: false });
-  if (uploadError) throw uploadError;
+  const { data: existing } = await db
+    .from("promote_showcase_media")
+    .select("id")
+    .eq("showcase_id", showcaseId)
+    .eq("url", path)
+    .maybeSingle();
+  if (existing) throw new MediaRecordError("That file is already attached.");
+
+  const bucket = db.storage.from(SHOWCASE_MEDIA_BUCKET);
+  const { data: info, error: infoError } = await bucket.info(path);
+  if (infoError || !info) {
+    throw new MediaRecordError("The upload wasn't found in storage. Please upload the file again.");
+  }
+  const infoRecord = info as unknown as Record<string, unknown>;
+  // Belt-and-suspenders: if Storage reports who wrote the object, it must be
+  // the caller. (The folder rule above is the real guarantee.)
+  const reportedOwner = (infoRecord.ownerId ?? infoRecord.owner) as string | undefined;
+  if (reportedOwner && reportedOwner !== user.id) {
+    throw new MediaRecordError("That upload doesn't belong to this item.");
+  }
+  const meta = (info.metadata ?? {}) as Record<string, unknown>;
+  const size = Number(info.size ?? meta.size);
+  const contentType = String(info.contentType ?? meta.mimetype ?? meta.contentType ?? "");
+
+  if (!Number.isFinite(size) || size <= 0 || size > MAX_MEDIA_BYTES) {
+    const { error: rmErr } = await bucket.remove([path]);
+    if (rmErr) console.error("showcase media cleanup failed", rmErr, path);
+    throw new MediaRecordError(
+      size > MAX_MEDIA_BYTES
+        ? `Files can be up to ${formatFileSize(MAX_MEDIA_BYTES)}.`
+        : "That file is empty."
+    );
+  }
+
+  const filename = displayFileName(input.filename);
+  const kind = mediaKindFor(contentType, filename);
 
   const { data, error } = await db
     .from("promote_showcase_media")
@@ -787,31 +1096,79 @@ export async function addShowcaseMedia(showcaseId: string, file: File): Promise<
       owner_id: user.id, // from the session, never the body
       kind,
       url: path, // the storage PATH — see the field comment in the migration
-      filename: file.name.slice(0, 200),
-      size_bytes: file.size,
+      filename,
+      size_bytes: size,
     })
     .select("id, kind, filename, size_bytes")
     .single();
 
   if (error || !data) {
-    // Roll back the just-uploaded object rather than leaving an orphan the
-    // owner can never see or remove (it has no DB row to list it by).
-    await db.storage.from(SHOWCASE_MEDIA_BUCKET).remove([path]);
-    throw error ?? new Error("Couldn't save the attachment. Please try again.");
+    // Leave no object the owner can never see or remove (it has no row).
+    const { error: rmErr } = await bucket.remove([path]);
+    if (rmErr) console.error("showcase media cleanup failed", rmErr, path);
+    console.error("recordShowcaseMedia insert failed", error);
+    throw new MediaRecordError(
+      kind === "file" && error?.code === "23514"
+        ? "This kind of file can't be attached yet. Please ask an admin to run the latest database update."
+        : "Couldn't save the attachment. Please try again."
+    );
   }
 
   return {
-    id: data.id as string,
-    kind: data.kind as MediaKind,
-    filename: data.filename as string,
-    sizeBytes: data.size_bytes as number,
+    ...mediaFromRow({ ...(data as Record<string, unknown>), label: null }),
     url: await signMediaPath(db, path),
   };
+}
+
+/** Set (or clear, with an empty string) the label of one attached file, as
+ *  the showcase's owner. Returns the label as stored. */
+export async function updateShowcaseMediaLabel(
+  showcaseId: string,
+  mediaId: string,
+  rawLabel: string
+): Promise<string | null> {
+  const { user, db } = await requireCurrentUser();
+  if (!isUuid(showcaseId) || !isUuid(mediaId)) throw new MediaRecordError("File not found.");
+
+  const label = cleanMediaLabel(rawLabel);
+  const { data, error } = await db
+    .from("promote_showcase_media")
+    .update({ label })
+    .eq("id", mediaId)
+    .eq("showcase_id", showcaseId)
+    .eq("owner_id", user.id)
+    .select("id")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new MediaRecordError("File not found.");
+  return label;
 }
 
 /** Remove one attached file as the showcase's owner. */
 export async function removeShowcaseMedia(showcaseId: string, mediaId: string): Promise<void> {
   const { user, db } = await requireCurrentUser();
+
+  // A public file page (no body text) must keep at least one file.
+  const [{ data: item }, { count }] = await Promise.all([
+    db
+      .from("promote_showcase")
+      .select("published, article_body")
+      .eq("id", showcaseId)
+      .eq("owner_id", user.id)
+      .maybeSingle(),
+    db
+      .from("promote_showcase_media")
+      .select("id", { count: "exact", head: true })
+      .eq("showcase_id", showcaseId),
+  ]);
+  if (item) {
+    const allowed = canRemoveFile({
+      isPublic: item.published === true,
+      hasBody: Boolean(((item.article_body as string) ?? "").trim()),
+      fileCount: count ?? 0,
+    });
+    if (!allowed.ok) throw new MediaRecordError(allowed.message);
+  }
 
   const { data, error } = await db
     .from("promote_showcase_media")
@@ -830,10 +1187,70 @@ export async function removeShowcaseMedia(showcaseId: string, mediaId: string): 
   }
 }
 
+/** A 60-second signed URL that downloads one NON-image file of a PUBLISHED
+ *  article under its original filename, for the permanent link
+ *  /promote/<slug>/files/<mediaId>. Null for an unknown or draft slug, an
+ *  unknown file, a file of another article, or an image.
+ *
+ *  Everything goes through the ANON client, so a draft can never resolve
+ *  here: promote_showcase, promote_showcase_media and storage.objects all
+ *  only let anon see rows of a published article. The .eq("published") and
+ *  the folder check below are belt-and-suspenders on top of that. */
+export async function getPublishedFileDownloadUrl(slug: string, mediaId: string): Promise<string | null> {
+  if (!slug || !isUuid(mediaId)) return null;
+  const anon = getAnonServerClient();
+  if (!anon) throw new ServerConfigError();
+
+  const { data: item } = await anon
+    .from("promote_showcase")
+    .select("id")
+    .eq("slug", slug)
+    .eq("published", true)
+    .maybeSingle();
+  if (!item) return null;
+  const showcaseId = item.id as string;
+
+  const { data: file } = await anon
+    .from("promote_showcase_media")
+    .select("id, kind, url, filename")
+    .eq("id", mediaId)
+    .eq("showcase_id", showcaseId)
+    .maybeSingle();
+  if (!file || file.kind === "image") return null;
+
+  const path = file.url as string;
+  if (!path || !path.startsWith(`${showcaseId}/`)) return null;
+
+  const { data, error } = await anon.storage
+    .from(SHOWCASE_MEDIA_BUCKET)
+    .createSignedUrl(path, DOWNLOAD_URL_TTL_SECONDS, {
+      download: displayFileName(file.filename as string),
+    });
+  if (error || !data?.signedUrl) return null;
+  return data.signedUrl;
+}
+
 // ── public article page ──────────────────────────────────────────────────────
 
 const PUBLIC_ARTICLE_SELECT =
   "id, slug, type, headline, standfirst, article_body, linkedin_post, title, authors, doi, link, journal, image_url, tags, created_at, published_at, owner_id, key_facts, cta_label, cta_url, quote, quote_by, share_text, event_starts_at, event_location, community_id";
+
+/** The owner's public profile slug (/researchers/<slug>), or null when their
+ *  profile is private or has no slug. Read through the ANON client, so the
+ *  users table's own "is_public = true" policy decides; the .eq is the same
+ *  rule stated again. Only the slug is selected, never email or anything else. */
+async function publicProfileSlug(anon: Db, ownerId: string): Promise<string | null> {
+  if (!ownerId) return null;
+  const { data, error } = await anon
+    .from("users")
+    .select("profile_slug")
+    .eq("id", ownerId)
+    .eq("is_public", true)
+    .maybeSingle();
+  if (error || !data) return null;
+  const slug = (data.profile_slug as string | null) ?? null;
+  return slug && slug.trim() ? slug : null;
+}
 
 /** Look up a PUBLISHED article by slug, for the public /promote/[slug] page.
  *
@@ -852,14 +1269,19 @@ export async function getPublishedArticleBySlug(slug: string): Promise<PublicArt
   const anon = getAnonServerClient();
   if (!anon) throw new ServerConfigError();
 
-  const { data, error } = await anon
-    .from("promote_showcase")
-    .select(PUBLIC_ARTICLE_SELECT)
-    .eq("slug", slug)
-    .eq("published", true)
-    .maybeSingle();
+  const read = (columns: string) =>
+    anon
+      .from("promote_showcase")
+      .select(columns)
+      .eq("slug", slug)
+      .eq("published", true)
+      .maybeSingle();
+  const { data: found, error } = await withOptionalColumns(["paper_year", "is_file_share"], (present) =>
+    read([PUBLIC_ARTICLE_SELECT, ...present].join(", "))
+  );
 
-  if (error || !data) return null;
+  if (error || !found) return null;
+  const data = found as unknown as Record<string, unknown> & { id: string };
   await attachCommunities([data as Record<string, unknown>]);
 
   // Owner name/affiliation via the SAME showcase_owners() function
@@ -869,9 +1291,10 @@ export async function getPublishedArticleBySlug(slug: string): Promise<PublicArt
   // one function the anon client is actually granted EXECUTE on, and this
   // page's own RLS-scoped Postgres round trip is already the more expensive
   // part of the request.
-  const [media, owners] = await Promise.all([
+  const [media, owners, ownerProfileSlug] = await Promise.all([
     listShowcaseMedia(anon, data.id as string),
     ownerMap(anon),
+    publicProfileSlug(anon, data.owner_id as string),
   ]);
 
   const type = canonicalType(data.type as string);
@@ -919,6 +1342,9 @@ export async function getPublishedArticleBySlug(slug: string): Promise<PublicArt
     created_at: data.created_at as string,
     publishedAt: (data.published_at as string | null) ?? null,
     owner: owners.get(data.owner_id as string) ?? null,
+    ownerProfileSlug,
+    paperYear: cleanPaperYear(data.paper_year ?? null),
+    isFileShare: data.is_file_share === true,
   };
 }
 
@@ -975,13 +1401,19 @@ export async function getOwnedArticleForEdit(slug: string): Promise<OwnedArticle
   const db = await getDb();
   if (!db) throw new ServerConfigError();
 
-  const { data, error } = await db
-    .from("promote_showcase")
-    .select(
-      "id, slug, type, headline, standfirst, article_body, linkedin_post, community_id, authors, published, owner_id, key_facts, cta_label, cta_url, quote, quote_by, share_text, event_starts_at, event_location, featured, link, doi"
-    )
-    .eq("slug", slug)
-    .maybeSingle();
+  const { data: row, error } = await withOptionalColumns(["is_file_share"], (present) =>
+    db
+      .from("promote_showcase")
+      .select(
+        [
+          "id, slug, type, headline, standfirst, article_body, linkedin_post, community_id, authors, published, owner_id, key_facts, cta_label, cta_url, quote, quote_by, share_text, event_starts_at, event_location, featured, link, doi",
+          ...present,
+        ].join(", ")
+      )
+      .eq("slug", slug)
+      .maybeSingle()
+  );
+  const data = row as unknown as Record<string, unknown> | null;
 
   if (error || !data || data.owner_id !== user.id) return null;
 
@@ -997,6 +1429,7 @@ export async function getOwnedArticleForEdit(slug: string): Promise<OwnedArticle
       id: data.id as string,
       slug: data.slug as string,
       published: Boolean(data.published),
+      isFileShare: data.is_file_share === true,
       type,
       headline: (data.headline as string) ?? "",
       standfirst,
@@ -1019,4 +1452,97 @@ export async function getOwnedArticleForEdit(slug: string): Promise<OwnedArticle
     },
     media,
   };
+}
+
+// ── shared files (/files) ────────────────────────────────────────────────────
+
+/** One row on /files. Never carries owner_id; `ownerName` comes from
+ *  showcase_owners() (name only), same as the Promote cards. */
+export type FileShareListItem = {
+  id: string;
+  slug: string;
+  title: string;
+  type: ShowcaseType;
+  /** Published date when published, otherwise the date it was made. */
+  date: string;
+  published: boolean;
+  ownerName: string | null;
+  /** The linked paper's title, or null when there is no paper. */
+  paperTitle: string | null;
+};
+
+const FILE_SHARE_LIST_SELECT =
+  "id, slug, type, title, headline, doi, link, published, published_at, created_at, owner_id, is_file_share";
+
+function toFileShareItem(r: Record<string, unknown>, owners: Map<string, ShowcaseOwner>): FileShareListItem {
+  return {
+    id: r.id as string,
+    slug: r.slug as string,
+    title: ((r.headline as string) || (r.title as string) || "").trim(),
+    type: canonicalType(r.type as string),
+    date: ((r.published ? r.published_at : null) as string | null) ?? (r.created_at as string),
+    published: r.published === true,
+    ownerName: owners.get(r.owner_id as string)?.name ?? null,
+    paperTitle: linkedPaperTitle({
+      title: r.title as string | null,
+      doi: r.doi as string | null,
+      link: r.link as string | null,
+    }),
+  };
+}
+
+/** "Your files": the signed-in person's own file shares, published or not,
+ *  newest first. [] when signed out, or before the is_file_share column
+ *  exists (there are no file shares to list until then). Reads through the
+ *  session client; promote_showcase's own-row policy is what lets a draft
+ *  through, and the owner_id filter is the same rule stated again. */
+export async function listMyFileShares(): Promise<FileShareListItem[]> {
+  const user = await getCurrentUser();
+  if (!user) return [];
+  const db = await getDb();
+  if (!db) throw new ServerConfigError();
+
+  const { data, error } = await db
+    .from("promote_showcase")
+    .select(FILE_SHARE_LIST_SELECT)
+    .eq("owner_id", user.id)
+    .eq("is_file_share", true)
+    .not("slug", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (error || !data) return [];
+
+  const rows = (data as unknown as Record<string, unknown>[]).filter((r) =>
+    listedInYourFiles(
+      { published: r.published === true, is_file_share: r.is_file_share as boolean, owner_id: r.owner_id as string },
+      user.id
+    )
+  );
+  const owners = await ownerMap(db);
+  return rows.map((r) => toFileShareItem(r, owners));
+}
+
+/** "Recently shared": everyone's PUBLISHED file shares, newest first. Read
+ *  through the ANON client, so it is the same list for every visitor and a
+ *  draft can never appear, whoever is looking. */
+export async function listRecentFileShares(limit = 50): Promise<FileShareListItem[]> {
+  const anon = getAnonServerClient();
+  if (!anon) throw new ServerConfigError();
+
+  const { data, error } = await anon
+    .from("promote_showcase")
+    .select(FILE_SHARE_LIST_SELECT)
+    .eq("published", true)
+    .eq("is_file_share", true)
+    .not("slug", "is", null)
+    .order("published_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error || !data) return [];
+
+  const rows = (data as unknown as Record<string, unknown>[]).filter((r) =>
+    listedInRecentlyShared({ published: r.published === true, is_file_share: r.is_file_share as boolean })
+  );
+  const owners = await ownerMap(anon);
+  return rows.map((r) => toFileShareItem(r, owners));
 }

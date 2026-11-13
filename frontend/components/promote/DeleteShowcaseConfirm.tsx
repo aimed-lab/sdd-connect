@@ -17,10 +17,22 @@ export default function DeleteShowcaseConfirm({
   entryId,
   entryTitle,
   onClose,
+  afterDeleteHref = "/promote?deleted=1",
+  heading,
+  message = "This can't be undone.",
+  confirmLabel = "Delete entry",
 }: {
   entryId: string;
   entryTitle: string;
   onClose: () => void;
+  /** Where to go once deleted: the Promote feed by default, /files for a
+   *  file share. */
+  afterDeleteHref?: string;
+  /** Wording, for screens that need their own (the file pages). The default
+   *  heading is `Delete "<title>"?`. */
+  heading?: string;
+  message?: string;
+  confirmLabel?: string;
 }) {
   const router = useRouter();
   const [deleting, setDeleting] = useState(false);
@@ -44,7 +56,7 @@ export default function DeleteShowcaseConfirm({
     const res = await deleteShowcaseAction(entryId);
     if (res.ok) {
       onClose();
-      router.replace("/promote?deleted=1");
+      router.replace(afterDeleteHref);
       router.refresh();
     } else {
       setError(res.error);
@@ -73,11 +85,9 @@ export default function DeleteShowcaseConfirm({
           </span>
           <div className="min-w-0">
             <h2 className="font-headline-md text-headline-md text-on-background">
-              Delete &ldquo;{entryTitle}&rdquo;?
+              {heading ?? <>Delete &ldquo;{entryTitle}&rdquo;?</>}
             </h2>
-            <p className="mt-2 font-body-md text-body-md text-secondary">
-              This can&apos;t be undone.
-            </p>
+            <p className="mt-2 font-body-md text-body-md text-secondary">{message}</p>
           </div>
         </div>
 
@@ -102,7 +112,7 @@ export default function DeleteShowcaseConfirm({
             disabled={deleting}
             className="px-6 py-3 rounded-lg font-label-md text-label-md text-on-error bg-error disabled:opacity-50"
           >
-            {deleting ? "Deleting…" : "Delete entry"}
+            {deleting ? "Deleting…" : confirmLabel}
           </button>
         </div>
       </div>

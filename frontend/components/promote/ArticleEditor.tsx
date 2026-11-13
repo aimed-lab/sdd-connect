@@ -21,7 +21,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { setArticlePublishedAction, updateArticleDraftAction } from "@/app/promote/actions";
 import MediaUploader from "@/components/promote/MediaUploader";
 import ShareButtons from "@/components/promote/ShareButtons";
-import { articleUrl } from "@/lib/articleFormat";
+import { SITE_URL } from "@/lib/articleFormat";
+import { itemEditPath, itemPath, itemUrlFor } from "@/lib/server/promote/itemAddress";
 import {
   CTA_DEFAULT_LABEL,
   CTA_LABEL_CHOICES,
@@ -54,6 +55,9 @@ export type ArticleEditorEntry = {
   id: string;
   slug: string;
   published: boolean;
+  /** A file share (/files/<slug>) rather than a Promote post. Absent for a
+   *  fresh draft from the submit flow, which is always a Promote post. */
+  isFileShare?: boolean;
   type: ShowcaseType;
   headline: string;
   standfirst: string;
@@ -152,7 +156,7 @@ export default function ArticleEditor({
   const [eventLocation, setEventLocation] = useState(initialEntry.eventLocation ?? "");
   const [featured, setFeatured] = useState(Boolean(initialEntry.featured));
   const [shareText, setShareText] = useState<ShareTexts>(() => {
-    const url = articleUrl(initialEntry.slug);
+    const url = itemUrlFor(SITE_URL, initialEntry.slug, Boolean(initialEntry.isFileShare));
     const stored = initialEntry.shareText ?? {
       linkedin: initialEntry.linkedinPost,
       x: "",
@@ -280,7 +284,12 @@ export default function ArticleEditor({
     else setSaveError(res.error);
   };
 
-  const canPublish = entry.published || (headline.trim() !== "" && articleBody.trim() !== "");
+  // A file share needs no body text when it has a file (the server applies
+  // the same rule: setArticlePublished).
+  const isFileShare = Boolean(initialEntry.isFileShare);
+  const canPublish =
+    entry.published ||
+    (headline.trim() !== "" && (articleBody.trim() !== "" || (isFileShare && initialMedia.length > 0)));
 
   const togglePublished = async () => {
     const nextPublished = !entry.published;
@@ -302,8 +311,8 @@ export default function ArticleEditor({
       // URL now points at a slug that no longer exists. Swap it for the
       // real one so a refresh — or "View" / the share link right below —
       // doesn't 404.
-      if (res.slug !== oldSlug && pathname === `/promote/${oldSlug}/edit`) {
-        router.replace(`/promote/${res.slug}/edit`);
+      if (res.slug !== oldSlug && pathname === itemEditPath(oldSlug, isFileShare)) {
+        router.replace(itemEditPath(res.slug, isFileShare));
       }
     } else {
       setSaveError(res.error);
@@ -390,7 +399,7 @@ export default function ArticleEditor({
           </div>
 
           {(["linkedin", "x", "bluesky"] as Platform[]).map((platform) => {
-            const url = articleUrl(entry.slug);
+            const url = itemUrlFor(SITE_URL, entry.slug, isFileShare);
             const len = shareLength(shareText[platform], url);
             const limit = PLATFORM_LIMIT[platform];
             const over = len > limit;
@@ -431,7 +440,7 @@ export default function ArticleEditor({
             <button
               type="button"
               onClick={() => {
-                const url = articleUrl(entry.slug);
+                const url = itemUrlFor(SITE_URL, entry.slug, isFileShare);
                 const draft = draftShareTexts({ type, headline, standfirst, facts: visibleFacts(keyFacts), url });
                 setShareText({
                   linkedin: fillLink(draft.linkedin, url),
@@ -446,7 +455,7 @@ export default function ArticleEditor({
             </button>
           </div>
 
-          <ShareButtons url={articleUrl(entry.slug)} title={headline} shareText={shareText} />
+          <ShareButtons url={itemUrlFor(SITE_URL, entry.slug, isFileShare)} title={headline} shareText={shareText} />
         </section>
       </div>
 
@@ -775,10 +784,10 @@ export default function ArticleEditor({
           </Link>
           {entry.published && (
             <Link
-              href={`/promote/${entry.slug}`}
+              href={itemPath(entry.slug, isFileShare)}
               className="btn-outline px-6 py-3 rounded-lg font-label-md text-label-md"
             >
-              View published article
+              {isFileShare ? "View page" : "View published article"}
             </Link>
           )}
           <button

@@ -29,6 +29,24 @@ export async function getClientSession(): Promise<Session | null> {
   return data.session;
 }
 
+/** The current access token, or null when signed out. getSession() refreshes
+ *  an expired token first, so a long upload can call this before each request
+ *  and always send a valid one. */
+export async function getClientAccessToken(): Promise<string | null> {
+  const session = await getClientSession();
+  return session?.access_token ?? null;
+}
+
+/** Where the browser sends a resumable (TUS) upload to Supabase Storage, and
+ *  the project key that goes with it. The signed-in user's token is added per
+ *  request (getClientAccessToken), so Storage applies that user's policies. */
+export function getResumableUploadTarget(): { endpoint: string; apiKey: string } | null {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const apiKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !apiKey) return null;
+  return { endpoint: `${url.replace(/\/+$/, "")}/storage/v1/upload/resumable`, apiKey };
+}
+
 /** Subscribe to session changes (sign-in, sign-out, token refresh). Returns
  *  an unsubscribe function. */
 export function onAuthStateChange(callback: (session: Session | null) => void): () => void {

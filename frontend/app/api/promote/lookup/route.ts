@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { fetchPaperById } from "@/lib/server/promote/fetchPaper";
 
-// POST /api/promote/lookup  { input: "<DOI | PMID>" }  -> PaperMetadata | 404
+// POST /api/promote/lookup  { input: "<DOI | PMID | doi.org or PubMed link>" }  -> PaperMetadata | 404
 //
 // Backs the DOI/PMID autofill on the showcase submit form. Deliberately
 // separate from /api/promote/generate: that route also calls Groq twice to

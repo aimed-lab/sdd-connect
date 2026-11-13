@@ -589,7 +589,9 @@ export type ArticleDraftPatch = {
 
 // ── media attachments ────────────────────────────────────────────────────
 
-export const MEDIA_KINDS = ["image", "slides"] as const;
+// image = shown inline on the item page; slides = PDF/PPTX; file = anything
+// else (CSV, Parquet, ZIP, MP4...). slides and file are download-only there.
+export const MEDIA_KINDS = ["image", "slides", "file"] as const;
 export type MediaKind = (typeof MEDIA_KINDS)[number];
 
 export type ShowcaseMedia = {
@@ -600,6 +602,8 @@ export type ShowcaseMedia = {
   url: string;
   filename: string;
   sizeBytes: number;
+  /** Optional one-line label, e.g. "External evaluation set used in Table 3". */
+  label: string | null;
 };
 
 /** The public article at /promote/[slug] — everything the page needs to
@@ -639,6 +643,13 @@ export type PublicArticle = {
    *  the gallery card; the page skips the attribution line rather than
    *  showing a blank one. */
   owner: ShowcaseOwner | null;
+  /** The owner's public profile slug (/researchers/<slug>), or null when
+   *  their profile is private. Never the paper's authors. */
+  ownerProfileSlug: string | null;
+  /** The paper's year, for a "Share a file" item with a paper; else null. */
+  paperYear: number | null;
+  /** A file share (/files/<slug>) rather than a Promote post (/promote/<slug>). */
+  isFileShare: boolean;
   id: string;
   tags: string[];
   keyFacts: KeyFact[];
