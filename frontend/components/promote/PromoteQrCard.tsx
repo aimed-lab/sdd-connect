@@ -6,8 +6,9 @@
 //
 // Same approach as components/teams/TeamQrCard.tsx (the qrcode package, built
 // in the browser), but the address is NOT window.location.origin: the page
-// passes `url`, built from the configured site URL (promoteQrUrl(SITE_URL,
-// slug), lib/server/promote/qrCode.ts), the same base the share buttons use.
+// passes `url`, built from the configured site URL (itemUrlFor(SITE_URL,
+// slug, isFileShare), lib/server/promote/itemAddress.ts), the same base the
+// share buttons use.
 // A QR downloaded on localhost or a preview deploy still opens the live site.
 //
 // Only rendered on the published page. /promote/[slug] 404s for a draft, and

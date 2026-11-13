@@ -9,6 +9,7 @@
 // No query string, no tracking code.
 
 import { articleUrlFor } from "./shareText.ts";
+import { itemUrlFor } from "./itemAddress.ts";
 
 /** The address the QR code points to. `siteBase` is the configured site URL
  *  (pass SITE_URL), not window.location.origin. */
@@ -19,4 +20,10 @@ export function promoteQrUrl(siteBase: string, slug: string): string {
 /** The downloaded PNG's file name: <slug>-qr.png. */
 export function promoteQrFileName(slug: string): string {
   return `${slug}-qr.png`;
+}
+
+/** The address a FILE SHARE's QR code points to: /files/<slug> on the
+ *  configured site. */
+export function fileShareQrUrl(siteBase: string, slug: string): string {
+  return itemUrlFor(siteBase, slug, true);
 }

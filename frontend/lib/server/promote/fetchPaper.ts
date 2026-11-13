@@ -18,6 +18,7 @@
 
 import { FETCH_TIMEOUT_MS } from "@/lib/server/sources/shared";
 import { cleanText } from "@/lib/sanitizeText";
+import { parsePaperInput } from "@/lib/server/promote/paperInput";
 
 export type PaperMetadata = {
   title: string;
@@ -33,15 +34,12 @@ export type PaperMetadata = {
 
 // ── Identifier detection / normalization ──────────────────────────────────────
 
-// Reduce user input to a bare identifier: strip a "doi:" prefix or a doi.org URL
-// wrapper so both "10.1101/x", "doi:10.1101/x" and "https://doi.org/10.1101/x"
-// resolve identically.
+// Reduce user input to a bare identifier: a DOI ("10.1101/x", "doi:10.1101/x",
+// "https://doi.org/10.1101/x") or a PubMed ID ("12345", "PMID: 12345",
+// "https://pubmed.ncbi.nlm.nih.gov/12345/"). See paperInput.ts (tested). Input
+// it doesn't recognise is passed on trimmed, as before.
 function normalizeInput(raw: string): string {
-  return raw
-    .trim()
-    .replace(/^https?:\/\/(dx\.)?doi\.org\//i, "")
-    .replace(/^doi:/i, "")
-    .trim();
+  return parsePaperInput(raw)?.id ?? raw.trim();
 }
 
 const isPmid = (s: string) => /^\d+$/.test(s); // PMIDs are numeric-only

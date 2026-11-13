@@ -20,6 +20,7 @@ export const MY_WORK: MenuItem[] = [
   { label: "My projects", href: "/projects", icon: "folder", tint: { fg: "#1A5632", bg: "#e4efe7" } },
   { label: "My teams", href: "/teams", icon: "group", tint: { fg: "#1d4f91", bg: "#e3ecf8" } },
   { label: "My wiki pages", href: "/pages", icon: "article", tint: { fg: "#5b3a8c", bg: "#ece6f5" } },
+  { label: "My shared files", href: "/files", icon: "upload_file", tint: { fg: "#0f5c63", bg: "#dff0f1" } },
   { label: "Saved items", href: "/saved", icon: "bookmark", tint: { fg: "#8a4a00", bg: "#f8ecd6" } },
 ];
 

@@ -348,6 +348,15 @@ function ExploreFeed() {
         title="Explore"
         subtitle="Ask a question about a disease, drug or topic and get an answer with sources, or jump to papers, trials and datasets."
         className="mb-6"
+        action={
+          <Link
+            href="/share"
+            className="btn-outline shrink-0 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg font-label-md text-label-md"
+          >
+            <span className="material-symbols-outlined text-base">upload_file</span>
+            Share a file
+          </Link>
+        }
       />
       <QuestionBox
         placeholder="Ask a question, e.g. dementia care in rural communities, KRAS in pancreatic cancer"

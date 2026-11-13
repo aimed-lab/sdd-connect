@@ -71,6 +71,7 @@ test("My work and Discover: the items, in order", () => {
     ["My projects", "/projects"],
     ["My teams", "/teams"],
     ["My wiki pages", "/pages"],
+    ["My shared files", "/files"],
     ["Saved items", "/saved"],
   ]);
   assert.deepEqual(DISCOVER.map((i) => [i.label, i.href, i.description]), [
