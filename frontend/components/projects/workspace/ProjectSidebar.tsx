@@ -1,4 +1,4 @@
-// The workspace's navigation: project name, its label (e.g. ColaboFest 2026),
+// The workspace's navigation: project name, its label (e.g. CollaboFest 2026),
 // team size, then one link per tab. On wide screens it is a column on the left;
 // on a phone the same links become a scrolling tab bar across the top. The tab
 // lives in the URL (?tab=), so links and the back button work. Server-safe.
@@ -29,7 +29,7 @@ export default function ProjectSidebar({
   /** projects.program: gives the chip its label (the Proposal tab stays on challengeKey). */
   program?: string | null;
   memberCount: number;
-  /** A ColaboFest finalist: shows the "★ Finalist" badge. */
+  /** A CollaboFest finalist: shows the "★ Finalist" badge. */
   finalist?: boolean;
   active: TabKey;
 }) {

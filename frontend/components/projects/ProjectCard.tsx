@@ -1,12 +1,12 @@
 // One project card on /projects. Pill treatment follows
 // components/collaborate/PostCard.tsx (filled pill backgrounds, not the
-// bare-text-plus-dot variant the ColaboFest Stitch screen used for its
+// bare-text-plus-dot variant the CollaboFest Stitch screen used for its
 // header chips — see the AGREE/DIVERGE note in STRUCTURE.md: we standardize
 // on the pill).
 //
-// A project in the ColaboFest 2026 program shows ONE line under its title, its
-// description line ("ColaboFest 2026 · C-107"), with a Finalist badge next to
-// it for a finalist; it has no separate "ColaboFest 2026" tag. The bottom row
+// A project in the CollaboFest 2026 program shows ONE line under its title, its
+// description line ("CollaboFest 2026 · C-107"), with a Finalist badge next to
+// it for a finalist; it has no separate "CollaboFest 2026" tag. The bottom row
 // (registration tag, submission status, deadline) has no divider and is left
 // out when there is nothing to put in it.
 //
@@ -77,7 +77,7 @@ export default function ProjectCard({ project }: { project: MyProjectSummary }) 
         <div className="flex flex-wrap items-center gap-2 mt-auto pt-1">
           {isColabofest && !inProgram && (
             <span className="px-3 py-1 rounded-full bg-surface-container-low text-primary font-label-sm text-label-sm">
-              ColaboFest
+              CollaboFest
             </span>
           )}
 

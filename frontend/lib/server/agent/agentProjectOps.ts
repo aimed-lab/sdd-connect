@@ -17,10 +17,10 @@ type Db = any;
 export type ProjectListItem = {
   id: string;
   name: string;
-  /** "ColaboFest 2026" for a challenge project, else null. */
+  /** "CollaboFest 2026" for a challenge project, else null. */
   label: string | null;
   challenge_key: string | null;
-  /** projects.program: "colabofest_2026" for a project in the ColaboFest program. */
+  /** projects.program: "colabofest_2026" for a project in the CollaboFest program. */
   program: string | null;
   my_role: string;
   team_size: number;
@@ -138,7 +138,7 @@ export const realProjectOps: ProjectOps = {
 };
 
 /** Status of every project the researcher is on (at most `max`), optionally only
- *  the ColaboFest ones. Used by the assistant's "status of my projects". */
+ *  the CollaboFest ones. Used by the assistant's "status of my projects". */
 export async function statusOfMyProjects(
   ops: ProjectOps,
   db: Db,

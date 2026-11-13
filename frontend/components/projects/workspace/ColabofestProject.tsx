@@ -1,4 +1,4 @@
-// A ColaboFest project (projects.program = 'colabofest_2026'), laid out like the CFDE
+// A CollaboFest project (projects.program = 'colabofest_2026'), laid out like the CFDE
 // conference app: one centered column (about 720px) with a quiet top row ("Welcome, <name>"
 // and "← My projects"), the green hero (label, ★ Finalist, title, avatars), a thin row
 // "⌂ Project home" with the next key date, and then either the HOME (a green call-to-action
@@ -95,7 +95,7 @@ export default function ColabofestProject({
 }: {
   projectId: string;
   name: string;
-  /** The project's description line (e.g. "ColaboFest 2026 · C-103"), above the title. */
+  /** The project's description line (e.g. "CollaboFest 2026 · C-103"), above the title. */
   label: string | null;
   finalist: boolean;
   firstName: string;
@@ -146,7 +146,7 @@ export default function ColabofestProject({
     nextDateShown: nextDate?.shown ?? null,
   });
 
-  // Same source as the home hero label ("ColaboFest 2026 · C-108"): the project code is its C-### part.
+  // Same source as the home hero label ("CollaboFest 2026 · C-108"): the project code is its C-### part.
   const projectCode = label?.match(/\bC-\d+\b/)?.[0] ?? null;
 
   return (
@@ -190,7 +190,7 @@ export default function ColabofestProject({
           {/* hero */}
           <header className="rounded-[20px] bg-primary text-on-primary px-5 py-5 sm:px-7 sm:py-6">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[11px] leading-4 font-bold tracking-[0.1em] opacity-80 break-words">{(label || "ColaboFest 2026").toUpperCase()}</span>
+              <span className="text-[11px] leading-4 font-bold tracking-[0.1em] opacity-80 break-words">{(label || "CollaboFest 2026").toUpperCase()}</span>
               {finalist && <span className="rounded-full bg-white px-2.5 py-0.5 text-[11.5px] font-bold leading-4 text-primary">★ Finalist</span>}
             </div>
             <h1 className="font-title text-on-primary break-words mt-2 text-[26px] sm:text-[32px] leading-[1.15]">{name}</h1>
@@ -409,7 +409,7 @@ export default function ColabofestProject({
             </li>
             <li>
               <Link href={`${base}?view=timeline`} className="text-primary hover:underline underline-offset-4">
-                ColaboFest timeline
+                CollaboFest timeline
               </Link>
             </li>
           </ul>

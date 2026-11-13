@@ -74,10 +74,10 @@ test("dates and times are Chicago time", () => {
 });
 
 test("event input: title, real date, https link only, trimmed optional text", () => {
-  const ok = parseEventInput({ title: "  ColaboFest  presentations ", date: "2026-11-13", time: "14:00", location: " UAB ", link: "https://example.org/x", description: " Talks " });
+  const ok = parseEventInput({ title: "  CollaboFest  presentations ", date: "2026-11-13", time: "14:00", location: " UAB ", link: "https://example.org/x", description: " Talks " });
   assert.deepEqual(ok, {
     ok: true,
-    value: { title: "ColaboFest presentations", starts_at: "2026-11-13T20:00:00.000Z", location: "UAB", link: "https://example.org/x", description: "Talks" },
+    value: { title: "CollaboFest presentations", starts_at: "2026-11-13T20:00:00.000Z", location: "UAB", link: "https://example.org/x", description: "Talks" },
   });
   const min = parseEventInput({ title: "Talk", date: "2026-11-13" });
   assert.equal(min.ok && min.value.location, null);

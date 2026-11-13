@@ -57,7 +57,7 @@ test("list: only the projects the researcher is on, with label, role and team si
   const { db } = fakeDb(tables());
   const list = await realProjectOps.list(db, "me");
   assert.deepEqual(list.map((p) => [p.name, p.label, p.my_role, p.team_size]), [
-    ["CD38 Fibrosis", "ColaboFest 2026", "lead", 2],
+    ["CD38 Fibrosis", "CollaboFest 2026", "lead", 2],
     ["KRAS Pilot", null, "member", 1],
   ]);
 });
@@ -85,7 +85,7 @@ test("status: a project the researcher cannot see comes back as nothing (row-lev
   assert.equal(await realProjectOps.status(db, P2), null);
 });
 
-test("status of my projects: all of them, or only the ColaboFest ones, capped", async () => {
+test("status of my projects: all of them, or only the CollaboFest ones, capped", async () => {
   const now = new Date("2026-10-27T12:00:00Z");
   const all = await statusOfMyProjects(realProjectOps, fakeDb(tables()).db, "me", { now });
   assert.deepEqual(all.projects.map((p) => p.project), ["CD38 Fibrosis", "KRAS Pilot"]);
@@ -94,7 +94,7 @@ test("status of my projects: all of them, or only the ColaboFest ones, capped", 
   const cf = await statusOfMyProjects(realProjectOps, fakeDb(tables()).db, "me", { colabofestOnly: true, now });
   assert.deepEqual(cf.projects.map((p) => p.project), ["CD38 Fibrosis"]);
 
-  // A ColaboFest REGISTRATION (challenge_key) is not in the program (program)
+  // A CollaboFest REGISTRATION (challenge_key) is not in the program (program)
   const t = tables();
   t.projects = t.projects.map((p) => (p.id === P2 ? { ...p, challenge_key: "colabofest_2026" } : p));
   const reg = await statusOfMyProjects(realProjectOps, fakeDb(t).db, "me", { colabofestOnly: true, now });

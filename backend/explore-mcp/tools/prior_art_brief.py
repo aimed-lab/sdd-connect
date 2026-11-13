@@ -4,7 +4,7 @@ tools/prior_art_brief.py — prior-art digest rendering.
 Given a project (name, description, target, indication, modality, stage) and
 search results ALREADY COLLECTED by the caller, renders a downloadable
 Markdown digest of what has already been tried against the same target/
-mechanism. Serves ColaboFest's "Rigor and innovation — differentiation from
+mechanism. Serves CollaboFest's "Rigor and innovation — differentiation from
 existing approaches" review criterion.
 
 PURE RENDERING MODULE, NO I/O. This used to also own the search (its own

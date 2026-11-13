@@ -1,9 +1,9 @@
-// lib/server/communityHome/colabofest.ts: the pure rules of the ColaboFest 2026
+// lib/server/communityHome/colabofest.ts: the pure rules of the CollaboFest 2026
 // community (no I/O, no next/* imports, so `npm test` covers them and client
 // components may import them).
 //
 //   * It is INVITE ONLY: no join button, no QR, no "Open to join".
-//   * Its members are the community_members rows PLUS everyone on a ColaboFest
+//   * Its members are the community_members rows PLUS everyone on a CollaboFest
 //     project (project_members), merged without duplicates.
 //   * Its Projects view lists project titles only, in code order (C-101, C-102 ...),
 //     and links only the viewer's own project (staff and admins: all of them).
@@ -85,7 +85,7 @@ export function splitNamed(people: PersonRow[]): { named: PersonRow[]; unnamedCo
 
 // ── projects ─────────────────────────────────────────────────────────────────
 
-/** The "C-108" part of a project's description line ("ColaboFest 2026 · C-108"). */
+/** The "C-108" part of a project's description line ("CollaboFest 2026 · C-108"). */
 export function projectCode(description: string | null | undefined): string | null {
   return (description ?? "").match(/\bC-(\d+)\b/)?.[0] ?? null;
 }

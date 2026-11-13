@@ -1,4 +1,4 @@
-// Project status rules, shared by the workspace, the ColaboFest program page and
+// Project status rules, shared by the workspace, the CollaboFest program page and
 // the assistant: the three checklists, overdue items, what to do next, who may
 // post what on the Updates tab, and a project's status pill. Pure: no I/O and no
 // next/* imports, so `npm test` covers it.
@@ -243,7 +243,7 @@ export function statusPill(args: {
 // ── program view ─────────────────────────────────────────────────────────────
 
 /** The program page and the link to it are for someone who is a lead or manager on
- *  at least one project in the ColaboFest program (projects.program). */
+ *  at least one project in the CollaboFest program (projects.program). */
 export function canSeeProgram(memberships: { program: string | null; role: string }[]): boolean {
   return memberships.some((m) => m.program === COLABOFEST_PROGRAM && isStaffRole(m.role));
 }
@@ -312,7 +312,7 @@ export function buildProjectStatus(i: StatusInput) {
   };
 }
 
-// ── program card (ColaboFest page) ───────────────────────────────────────────
+// ── program card (CollaboFest page) ───────────────────────────────────────────
 
 export type ProgramCard = {
   id: string;

@@ -138,7 +138,7 @@ test("discussions: links are clickable, everything else stays text", () => {
 
 // ── welcome card: dismissal ───────────────────────────────────────────────────
 
-test("welcome: ColaboFest only, until dismissed", () => {
+test("welcome: CollaboFest only, until dismissed", () => {
   assert.equal(showWelcome({ isColabofest: true, dismissed: false }), true);
   assert.equal(showWelcome({ isColabofest: true, dismissed: true }), false);
   assert.equal(showWelcome({ isColabofest: false, dismissed: false }), false);
@@ -227,8 +227,8 @@ test("access: the page decides before it reads the project, and the two screens 
   assert.match(screens, /export function SignInGate\(\{ returnPath \}/);
   assert.doesNotMatch(screens, /project\.name|description|projectName/);
   for (const text of [
-    "Sign in to open your ColaboFest project",
-    "Use the email address you used for your ColaboFest submission.",
+    "Sign in to open your CollaboFest project",
+    "Use the email address you used for your CollaboFest submission.",
     "Sign in or create an account",
     "Restricted access",
     "This project is only open to its team.",
@@ -380,7 +380,7 @@ test("access: nothing treats a visible projects row as membership", () => {
   const ops = src("lib/server/agent/agentProjectOps.ts");
   const status = ops.slice(ops.indexOf("async status("));
   assert.ok(status.indexOf('from("project_members")') > 0 && status.indexOf('from("project_members")') < status.indexOf('from("checklist_items")'));
-  // the new ColaboFest modules read only member-gated tables
+  // the new CollaboFest modules read only member-gated tables
   for (const f of ["discussions.ts", "updates.ts", "welcome.ts"]) {
     assert.doesNotMatch(src(`lib/server/projectWorkspace/${f}`), /from\("projects"\)/, f);
   }

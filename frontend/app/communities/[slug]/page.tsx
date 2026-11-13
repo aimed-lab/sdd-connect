@@ -135,7 +135,7 @@ export default async function CommunityDetailPage({
   // still-unlinked membership state.
   await claimPendingCommunityMemberships();
 
-  // ColaboFest 2026 is invite only, and its members are the community_members rows
+  // CollaboFest 2026 is invite only, and its members are the community_members rows
   // PLUS everyone on one of its projects (a project_members row). Nobody joins it.
   const isColab = isColabofestCommunity(slug);
   const [user, communityMembership, stats, colabViewer] = await Promise.all([
@@ -192,7 +192,7 @@ export default async function CommunityDetailPage({
   // The roster, when this viewer may see it. Its length (not the public stat)
   // is the member count whenever the roster is visible, so the header matches
   // what the Members view lists (hidden staff rows are not in it).
-  // ColaboFest: only people with a real name are listed (no email ever reaches the page);
+  // CollaboFest: only people with a real name are listed (no email ever reaches the page);
   // the rest are counted in "+ N team members who have not signed in yet".
   const colabAll = isColab ? await listColabofestPeople(community.id, user?.id ?? null) : [];
   const { named: colabPeople, unnamedCount: colabUnnamed } = splitNamed(colabAll);
@@ -294,7 +294,7 @@ export default async function CommunityDetailPage({
 
   // ── the member's tiles and home ─────────────────────────────────────────────
   const pinnedHref = pinned ? (pinned.files[0]?.url ?? pinned.url) : null;
-  // ColaboFest: every project title, for members only (a non-member never triggers this read).
+  // CollaboFest: every project title, for members only (a non-member never triggers this read).
   const colabProjects = isColab && isMember && available.includes("projects") ? await listColabofestProjects() : null;
   const openAllProjects = membership.isAdmin || colabViewer.isManager;
   const colabRows = colabProjects ? buildProjectRows(colabProjects, { myProjectIds: colabViewer.projectIds, openAll: openAllProjects }) : [];

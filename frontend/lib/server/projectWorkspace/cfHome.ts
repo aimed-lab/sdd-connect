@@ -1,4 +1,4 @@
-// lib/server/projectWorkspace/cfHome.ts: the small texts on a ColaboFest project's home
+// lib/server/projectWorkspace/cfHome.ts: the small texts on a CollaboFest project's home
 // (components/projects/workspace/ColabofestProject.tsx): the grey status line under each
 // tile, and the "More you can do here" cards. Pure, so `npm test` covers it.
 

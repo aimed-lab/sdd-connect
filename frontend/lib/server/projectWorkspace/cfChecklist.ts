@@ -1,4 +1,4 @@
-// lib/server/projectWorkspace/cfChecklist.ts: the Tasks view of a ColaboFest project
+// lib/server/projectWorkspace/cfChecklist.ts: the Tasks view of a CollaboFest project
 // writes to the existing checklist (checklist_items, lists 'team' | 'sparc' |
 // 'southern_research') through the existing functions in lib/server/projects.ts, but
 // only after checking the caller's role here:

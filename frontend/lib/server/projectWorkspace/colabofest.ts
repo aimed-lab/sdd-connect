@@ -1,4 +1,4 @@
-// The rules of the ColaboFest project home, as pure functions (no I/O, no next/*
+// The rules of the CollaboFest project home, as pure functions (no I/O, no next/*
 // imports) so `npm test` covers them and client components may import them:
 // who may open a project, who may post and delete what, the welcome card, the
 // role label, and the small text helpers for discussions. The database enforces
@@ -11,7 +11,7 @@ import { isStaffRole, nextUp, type TaskItem } from "./status.ts";
 
 export type AccessDecision = "sign_in" | "restricted" | "allowed";
 
-/** ColaboFest projects are invite-only: signed out sees the sign-in page, signed
+/** CollaboFest projects are invite-only: signed out sees the sign-in page, signed
  *  in but not on the project sees "Restricted access", a member gets in. The link
  *  alone is never enough, and neither screen carries any project data. */
 export function decideAccess(args: { signedIn: boolean; isMember: boolean }): AccessDecision {
@@ -48,7 +48,7 @@ export async function hasProjectMemberRow(db: MembershipDb, projectId: string, u
 
 /** "Still can't get in?" mailto, with the project link in the subject. */
 export function contactMailto(projectLink: string, contact: string = COLABOFEST_CONTACT_EMAIL): string {
-  return `mailto:${contact}?subject=${encodeURIComponent(`Can't open my ColaboFest project: ${projectLink}`)}`;
+  return `mailto:${contact}?subject=${encodeURIComponent(`Can't open my CollaboFest project: ${projectLink}`)}`;
 }
 
 // ── announcements ────────────────────────────────────────────────────────────
@@ -161,7 +161,7 @@ export function shortDate(iso: string): string {
 
 // ── welcome card ─────────────────────────────────────────────────────────────
 
-/** Shown on a ColaboFest project until this person dismisses it. */
+/** Shown on a CollaboFest project until this person dismisses it. */
 export function showWelcome(args: { isColabofest: boolean; dismissed: boolean }): boolean {
   return args.isColabofest && !args.dismissed;
 }

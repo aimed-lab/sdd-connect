@@ -1,4 +1,4 @@
-// ColaboFest 2026: the program dates and the contact address, in ONE place.
+// CollaboFest 2026: the program dates and the contact address, in ONE place.
 // No imports, so server and client code (and `npm test`) can all use it.
 //
 // Change a date or the contact email here and the Welcome card's date line, the

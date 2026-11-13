@@ -5,8 +5,8 @@
 // the `colabofest` prop:
 //   - from "New project" (colabofest=false): heading "Create a project",
 //     shows the collapsed "Entering a challenge?" disclosure.
-//   - from the ColaboFest banner (colabofest=true): heading "Start your
-//     ColaboFest project" + a ColaboFest pill, no challenge disclosure (this
+//   - from the CollaboFest banner (colabofest=true): heading "Start your
+//     CollaboFest project" + a CollaboFest pill, no challenge disclosure (this
 //     entry point already implies challenge_key = 'colabofest_2026').
 //
 // Only rendered for a signed-in user — app/projects/new/page.tsx redirects to
@@ -146,7 +146,7 @@ export default function CreateProjectForm({
         </h1>
         {colabofest && (
           <span className="inline-flex items-center px-3 py-1 rounded-full bg-surface-container-low text-primary font-label-sm text-label-sm mt-2">
-            ColaboFest
+            CollaboFest
           </span>
         )}
         <p className="mt-2 font-body-md text-body-md text-secondary">
@@ -262,7 +262,7 @@ export default function CreateProjectForm({
           />
         </div>
 
-        {/* ColaboFest's deadline is fixed (30 September 2026, see
+        {/* CollaboFest's deadline is fixed (30 September 2026, see
             COLABOFEST_DEADLINE in components/projects/ColabofestBanner.tsx)
             and set server-side in createProjectAction — not this team's
             choice, so this entry point doesn't even ask. Hiding the field
@@ -284,7 +284,7 @@ export default function CreateProjectForm({
         )}
 
         {/* "Entering a challenge?" — only on the plain "New project" entry
-            point. The ColaboFest-banner entry point already implies
+            point. The CollaboFest-banner entry point already implies
             challenge_key, so there is nothing here to choose. */}
         {!colabofest && (
           <div className="border border-surface-dim rounded-lg p-4 bg-surface-container-lowest/50">
@@ -316,7 +316,7 @@ export default function CreateProjectForm({
                   className={`${inputClass} appearance-none cursor-pointer`}
                 >
                   <option value={UNSET}>None</option>
-                  <option value={COLABOFEST_CHALLENGE_KEY}>ColaboFest 2026</option>
+                  <option value={COLABOFEST_CHALLENGE_KEY}>CollaboFest 2026</option>
                 </select>
                 <p className="font-body-sm text-body-sm text-secondary mt-1">
                   Linking a challenge applies specific formatting and evaluation

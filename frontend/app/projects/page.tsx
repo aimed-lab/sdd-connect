@@ -1,11 +1,11 @@
 // Projects list — /projects.
 //
-// Layout follows frontend/design/projects/STRUCTURE.md, screen 1: ColaboFest
+// Layout follows frontend/design/projects/STRUCTURE.md, screen 1: CollaboFest
 // banner, then "Your projects" header + grid, then the empty state. Nav/
 // Footer come from the root layout — the Stitch file's own header/footer
 // (with invented "Ethics Policy"/"Methodology"/etc. links) are discarded, per
-// that same doc's fix #1. The cards come ColaboFest finalists first, then the
-// other ColaboFest projects by code, then every other project newest first
+// that same doc's fix #1. The cards come CollaboFest finalists first, then the
+// other CollaboFest projects by code, then every other project newest first
 // (sortMyProjects, lib/server/projectWorkspace/programCards.ts).
 //
 // SERVER component, and a REDIRECT rather than a gate panel for a signed-out
@@ -82,9 +82,9 @@ export default async function ProjectsPage({
           style={{ background: "var(--type-other-bg)" }}
         >
           <span className="min-w-0">
-            <span className="block font-title text-[20px] font-medium text-on-background">ColaboFest 2026 projects</span>
+            <span className="block font-title text-[20px] font-medium text-on-background">CollaboFest 2026 projects</span>
             <span className="block mt-1 font-body-md text-body-md text-secondary">
-              See how every ColaboFest project you lead or manage is doing.
+              See how every CollaboFest project you lead or manage is doing.
             </span>
           </span>
           <span className="shrink-0 flex items-center gap-2 font-label-md text-label-md text-primary">

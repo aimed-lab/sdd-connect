@@ -1,6 +1,6 @@
 "use client";
 
-// Project settings, for site admins only: the "ColaboFest finalist" switch. It
+// Project settings, for site admins only: the "CollaboFest finalist" switch. It
 // shows the "★ Finalist" badge next to the project name. The page renders this
 // only for a site admin, and the database refuses anybody else.
 
@@ -33,7 +33,7 @@ export default function FinalistToggle({ projectId, finalist }: { projectId: str
     <section className="rounded-xl border border-outline-variant/30 bg-white p-4 flex flex-col gap-2 max-w-md" aria-label="Project settings">
       <h3 className="font-label-lg text-[16px] text-on-background">Project settings (site admin)</h3>
       <label className="flex items-center justify-between gap-4 font-body-md text-body-md text-on-background cursor-pointer">
-        <span>ColaboFest finalist</span>
+        <span>CollaboFest finalist</span>
         <input type="checkbox" role="switch" checked={on} disabled={busy} onChange={flip} className="w-5 h-5 accent-primary" />
       </label>
       {error && (

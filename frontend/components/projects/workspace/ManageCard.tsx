@@ -1,4 +1,4 @@
-// One collapsible card of a ColaboFest project's Manage view (a plain <details>, so it
+// One collapsible card of a CollaboFest project's Manage view (a plain <details>, so it
 // works without client code): a title row that opens and closes the content. Server-safe.
 
 export default function ManageCard({

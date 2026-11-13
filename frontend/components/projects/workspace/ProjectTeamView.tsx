@@ -1,6 +1,6 @@
 "use client";
 
-// The Team view of a ColaboFest project: a clean list (avatar, name, role: Lead / Member /
+// The Team view of a CollaboFest project: a clean list (avatar, name, role: Lead / Member /
 // SPARC team, and the SPARC or Southern Research affiliation when set). Managers (the
 // SPARC team) also get "Add a member by email" and "Remove" for ordinary members, the same
 // flow and rules as the old Team section (lib/server/projects.ts addProjectMember /

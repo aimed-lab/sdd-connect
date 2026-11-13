@@ -31,7 +31,7 @@ function asStage(v: unknown): ProjectStage | null {
 }
 
 /** Create a project as the signed-in user. `colabofest` is a plain boolean
- *  from the form's entry point (the ColaboFest banner vs. plain "New
+ *  from the form's entry point (the CollaboFest banner vs. plain "New
  *  project") — this is the ONE place a caller-supplied flag turns into the
  *  real challenge_key string, so a forged request can only ever set the one
  *  real value this UI knows about, never an arbitrary string. */
@@ -40,7 +40,7 @@ export async function createProjectAction(input: {
   description: string;
   deadline?: string;
   colabofest?: boolean;
-  challenge?: string; // from the "Entering a challenge?" select, non-ColaboFest entry point
+  challenge?: string; // from the "Entering a challenge?" select, non-CollaboFest entry point
   target?: string;
   indication?: string;
   modality?: string;
@@ -59,7 +59,7 @@ export async function createProjectAction(input: {
       ? COLABOFEST_CHALLENGE_KEY
       : null;
 
-  // ColaboFest's deadline is fixed (30 September 2026) and is not the
+  // CollaboFest's deadline is fixed (30 September 2026) and is not the
   // team's choice — set it HERE, server-side, regardless of anything the
   // client sent. The create form hides the field entirely for this entry
   // point, but that's a courtesy: even a hand-crafted request claiming

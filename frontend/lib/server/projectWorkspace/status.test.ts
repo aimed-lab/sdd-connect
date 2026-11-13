@@ -60,7 +60,7 @@ test("a lead can give the member or manager role, never lead through this path",
   assert.deepEqual(assignableRoles(), ["member", "manager"]);
 });
 
-test("the program page is for a lead or manager on a ColaboFest project", () => {
+test("the program page is for a lead or manager on a CollaboFest project", () => {
   const cf = "colabofest_2026";
   assert.equal(canSeeProgram([{ program: cf, role: "manager" }]), true);
   assert.equal(canSeeProgram([{ program: cf, role: "lead" }]), true);

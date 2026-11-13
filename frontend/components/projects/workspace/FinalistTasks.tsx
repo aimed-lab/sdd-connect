@@ -1,6 +1,6 @@
 "use client";
 
-// The Tasks view of a ColaboFest finalist: three numbered cards. Each shows the title,
+// The Tasks view of a CollaboFest finalist: three numbered cards. Each shows the title,
 // a short description, the due date and a status (To do / Done). The project lead and
 // the SPARC team also get "Mark done" / "Mark not done". The status is stored in the
 // project's checklist items (see lib/server/projectWorkspace/finalistTasksDb.ts).

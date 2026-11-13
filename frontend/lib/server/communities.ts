@@ -359,10 +359,10 @@ export async function listMyMemberships(): Promise<
  *  dropdown at all, not an empty one).
  *
  *  Only ever reads an explicit community_members row — NOT
- *  is_community_member()'s broader "or a ColaboFest lead/project-member via
+ *  is_community_member()'s broader "or a CollaboFest lead/project-member via
  *  `projects`" form (see that function's own comment in
- *  2026-08-20_communities.sql). A ColaboFest lead who has never actually
- *  joined `community_members` won't see ColaboFest in this picker; they
+ *  2026-08-20_communities.sql). A CollaboFest lead who has never actually
+ *  joined `community_members` won't see CollaboFest in this picker; they
  *  would still be allowed to save it (promote_showcase's WITH CHECK uses
  *  can_post_to_community, which DOES cover that derived form) if a request
  *  reached the server some other way, but the picker itself only lists what

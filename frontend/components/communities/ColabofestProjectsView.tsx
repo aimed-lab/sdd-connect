@@ -1,4 +1,4 @@
-// The Projects view of the ColaboFest 2026 community: one white box, one row per
+// The Projects view of the CollaboFest 2026 community: one white box, one row per
 // project, the title only. A project the viewer is on (or any, for SPARC staff and
 // admins) has an "Open →" link; every other row says "Team only" with a lock and has
 // no link and no id in the markup. Server component.

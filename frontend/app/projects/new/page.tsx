@@ -1,7 +1,7 @@
 // Create a project — /projects/new.
 //
 // Layout follows frontend/design/projects/STRUCTURE.md, screens 2 and 3: one
-// centered form, both entry points ("New project" and the ColaboFest banner)
+// centered form, both entry points ("New project" and the CollaboFest banner)
 // served by the same page, distinguished by ?colabofest=1. Nav/Footer come
 // from the root layout — the Stitch files' own stripped-down nav is discarded.
 //
@@ -31,7 +31,7 @@ export default async function NewProjectPage({
     // Built from the ACTUAL incoming search params, not hardcoded to plain
     // "/projects/new" — a signed-out visitor hitting
     // /projects/new?colabofest=1 previously lost that query string here and
-    // landed back on the plain form after logging in, not the ColaboFest
+    // landed back on the plain form after logging in, not the CollaboFest
     // one they actually asked for.
     const params = await searchParams;
     const qs = new URLSearchParams();

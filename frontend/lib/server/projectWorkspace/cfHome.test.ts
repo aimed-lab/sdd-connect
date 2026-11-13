@@ -1,4 +1,4 @@
-// Run with `npm test`. The status line under each ColaboFest tile, and the "More you can do here" cards.
+// Run with `npm test`. The status line under each CollaboFest tile, and the "More you can do here" cards.
 
 import test from "node:test";
 import assert from "node:assert/strict";

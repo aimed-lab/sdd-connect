@@ -14,7 +14,11 @@ test("the questions that mean 'status of my projects'", () => {
   ]) {
     assert.deepEqual(projectStatusQuestion(q), { matches: true, colabofestOnly: false }, q);
   }
-  for (const q of ["What is the status of my ColaboFest projects", "how are my colabofest 2026 projects doing"]) {
+  for (const q of [
+    "What is the status of my CollaboFest projects",
+    "how are my collabofest 2026 projects doing",
+    "how are my colabofest 2026 projects doing", // the old spelling still works
+  ]) {
     assert.deepEqual(projectStatusQuestion(q), { matches: true, colabofestOnly: true }, q);
   }
 });
@@ -27,7 +31,7 @@ test("other messages are not project-status questions", () => {
 
 test("a status question is not a topic to search for", () => {
   assert.equal(topicFromMessage("What's the status of my projects?"), null);
-  assert.equal(topicFromMessage("status of my ColaboFest projects"), null);
+  assert.equal(topicFromMessage("status of my CollaboFest projects"), null);
   assert.ok(topicFromMessage("Find resources on KRAS in pancreatic cancer"));
 });
 
@@ -54,6 +58,6 @@ test("the answer names the status, progress, overdue owners, help, latest and wi
 
 test("empty answers say what to do, and a long list says how many were shown", () => {
   assert.match(formatStatusReply([]), /not on any projects yet.*New project/);
-  assert.match(formatStatusReply([], { colabofestOnly: true }), /ColaboFest 2026/);
+  assert.match(formatStatusReply([], { colabofestOnly: true }), /CollaboFest 2026/);
   assert.match(formatStatusReply([sample], { total: 12 }), /Showing 1 of 12 projects/);
 });

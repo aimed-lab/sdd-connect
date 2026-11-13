@@ -41,7 +41,7 @@ THE STEPS
   3. Checklist proposal — given the project description and what step 1 & 2
      actually found, ask the LLM for concrete next steps and gaps, grounded in
      the findings, skipping anything that duplicates an existing item. SKIPPED
-     entirely for a ColaboFest project — see run_project_agent_async's own
+     entirely for a CollaboFest project — see run_project_agent_async's own
      docstring.
 
 WRITES NOTHING. This module (and the HTTP route in server.py that calls it)
@@ -1098,14 +1098,14 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
     right before each step starts, purely so a caller (the job-polling HTTP
     route below) can report real progress instead of a bare spinner. A
     callback failure is swallowed; it must never break the pipeline it's
-    just observing. `proposing_checklist` is never reported for a ColaboFest
+    just observing. `proposing_checklist` is never reported for a CollaboFest
     project (see below) — there's no step to be "on."
 
     CHALLENGE PROJECTS (project["challenge_key"] set) GET RESOURCES ONLY, NO
-    CHECKLIST. A ColaboFest project already comes pre-filled with SPARC's own
+    CHECKLIST. A CollaboFest project already comes pre-filled with SPARC's own
     nine readiness items — that checklist is SPARC's, not ours, and proposing
     six more on top of it is exactly the "overwhelming it" Chen called out
-    when the agent was first gated off ColaboFest entirely. Resource
+    when the agent was first gated off CollaboFest entirely. Resource
     discovery (step 1 + step 2) is pure value with no such conflict, so it's
     no longer withheld — only step 3 (checklist proposal) is skipped, and
     it's SKIPPED, not run-then-discarded: `_propose_checklist` is never

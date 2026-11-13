@@ -66,7 +66,7 @@ type AgentResult = {
   summary: string;
   selected_items: ProposedItem[];
   checklist_items: ProposedChecklistItem[];
-  // False for a ColaboFest project — the backend skips the checklist step
+  // False for a CollaboFest project — the backend skips the checklist step
   // entirely there (see run_project_agent_async in tools/project_agent.py),
   // so checklist_items is always []. The existing `.length > 0` guards below
   // already keep an empty checklist section from rendering either way; this
@@ -365,7 +365,7 @@ export default function AgentSection({
 }: {
   projectId: string;
   projectName: string;
-  // ColaboFest projects: resources only, no checklist — a ColaboFest project
+  // CollaboFest projects: resources only, no checklist — a CollaboFest project
   // already comes pre-filled with SPARC's own nine readiness items, and
   // proposing six more of ours on top is what Chen called overwhelming it.
   // Resource discovery has no such conflict, so it's not withheld — only

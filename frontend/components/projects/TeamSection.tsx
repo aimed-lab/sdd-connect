@@ -137,7 +137,7 @@ export default function TeamSection({
   projectId: string;
   members: ProjectMember[];
   isLead: boolean;
-  /** Show the SPARC / Southern Research organisation dropdown (ColaboFest program projects). */
+  /** Show the SPARC / Southern Research organisation dropdown (CollaboFest program projects). */
   showAffiliation?: boolean;
   /** The signed-in viewer's own user id — needed to tell "the viewer's own
    *  row" apart from any other lead's row (only the former gets a "Step

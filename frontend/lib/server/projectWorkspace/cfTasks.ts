@@ -1,4 +1,4 @@
-// lib/server/projectWorkspace/cfTasks.ts: the pure rules of the ColaboFest Tasks view:
+// lib/server/projectWorkspace/cfTasks.ts: the pure rules of the CollaboFest Tasks view:
 // the three lists (Your team, SPARC, Southern Research), what each row shows, who may
 // change what, and the progress numbers. No next/* imports, so `npm test` covers it.
 
@@ -90,7 +90,7 @@ export function visibleCfLists(lists: CfList[], role: string | null | undefined)
   return lists.filter((l) => l.key !== "southern_research" || l.total > 0 || canEditList(role));
 }
 
-/** The Tasks tile: every finalist has it; another ColaboFest team only when a list has items
+/** The Tasks tile: every finalist has it; another CollaboFest team only when a list has items
  *  (a manager always, so they can add the first). */
 export function showTasksTile(lists: CfList[], finalist: boolean, role: string | null | undefined): boolean {
   return finalist || canEditList(role) || lists.some((l) => l.total > 0);
