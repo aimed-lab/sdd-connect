@@ -270,14 +270,14 @@ function SearchResults() {
   // reflects the full response once loading is false).
   const capturedTopicRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!showError || capturedTopicRef.current === topic) return;
+    if (!showError || data?.rate_limited || capturedTopicRef.current === topic) return;
     capturedTopicRef.current = topic;
     submitFeedbackAction({
       page_path: `/explore/${encodeURIComponent(topic)}`,
       message: null,
       context: { query: topic, outcome: backendError ? "backend_error" : "empty" },
     });
-  }, [showError, backendError, topic]);
+  }, [showError, backendError, topic, data?.rate_limited]);
 
   useEffect(() => {
     if (scope === "episode") router.replace(`/explore/podcast?q=${encodeURIComponent(topic)}`);
@@ -604,9 +604,13 @@ function SearchResults() {
                 {backendError ? (
                   <>
                     <span className="material-symbols-outlined text-5xl text-secondary/50">cloud_off</span>
-                    <h2 className="mt-4 font-title text-[24px] font-medium text-on-background">Couldn&apos;t search right now</h2>
+                    <h2 className="mt-4 font-title text-[24px] font-medium text-on-background">
+                      {data?.rate_limited ? "Too many searches" : <>Couldn&apos;t search right now</>}
+                    </h2>
                     <p className="mt-2 text-secondary font-body-md">
-                      The discovery backend didn&apos;t respond. This isn&apos;t about your search, please try again in a moment.
+                      {data?.message ?? (
+                        <>The discovery backend didn&apos;t respond. This isn&apos;t about your search, please try again in a moment.</>
+                      )}
                     </p>
                   </>
                 ) : (

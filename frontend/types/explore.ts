@@ -147,6 +147,10 @@ export type ExploreResponse = {
   reasoning?: string | null;
   sections: ExploreSection[];
   error?: boolean;
+  /** Set with a 429: the caller sent too many searches in a short time. */
+  rate_limited?: boolean;
+  /** A reason to show instead of the generic error copy (400 / 429). */
+  message?: string;
 };
 
 /** POST /api/trial-landscape (#82): one bounded ClinicalTrials.gov search,
@@ -184,4 +188,6 @@ export type TrialLandscape = {
   exhaustive: false;
   groups: TrialLandscapeGroup[];
   error?: string | boolean;
+  /** Set on a 400 / 429 from the route: shown instead of the generic error. */
+  message?: string;
 };

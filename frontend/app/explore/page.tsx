@@ -95,15 +95,16 @@ function TrialStatusControl({
   );
 }
 
-function FeedError() {
+function FeedError({ data }: { data?: ExploreResponse | null }) {
+  const limited = data?.rate_limited === true;
   return (
     <div className="max-w-md mx-auto text-center py-16">
       <span className="material-symbols-outlined text-5xl text-secondary/50">cloud_off</span>
       <h2 className="mt-4 font-title text-[24px] font-medium text-on-background">
-        Couldn&apos;t load the live feed right now
+        {limited ? "Too many searches" : <>Couldn&apos;t load the live feed right now</>}
       </h2>
       <p className="mt-2 text-secondary font-body-md">
-        The discovery backend didn&apos;t respond. Please try again in a moment.
+        {data?.message ?? <>The discovery backend didn&apos;t respond. Please try again in a moment.</>}
       </p>
       <button
         onClick={() => location.reload()}
@@ -270,7 +271,7 @@ function ExploreFeed() {
           ) : (
             <p className="text-secondary font-body-md">
               {failed || data?.error === true
-                ? "Live results are unavailable right now."
+                ? data?.message ?? "Live results are unavailable right now."
                 : `No live ${noun} in this feed yet.`}
             </p>
           )}
@@ -283,7 +284,7 @@ function ExploreFeed() {
     if (kind === "tool" || kind === "dataset") return resourceView(kind);
 
     if (loading) return <BlockSkeleton />;
-    if (showError) return <FeedError />;
+    if (showError) return <FeedError data={data} />;
 
     if (kind === "news") {
       const news = itemsOf("news");
@@ -418,7 +419,7 @@ function ExploreFeed() {
       {hero}
       <div className="mt-12 flex flex-col gap-14">
         <YourLivingPages />
-        {loading ? <BlockSkeleton className="h-40" /> : showError ? <FeedError /> : <TodayCards cards={today} />}
+        {loading ? <BlockSkeleton className="h-40" /> : showError ? <FeedError data={data} /> : <TodayCards cards={today} />}
         <CommunitiesNear items={communities} />
       </div>
     </ExploreShell>

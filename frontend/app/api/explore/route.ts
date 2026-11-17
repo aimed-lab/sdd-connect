@@ -3,6 +3,15 @@ import { getCurrentUserInterests } from "@/lib/server/interests";
 import { getProject } from "@/lib/server/projects";
 import { buildProjectExploreQuery } from "@/lib/projectTypes";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
+import { clientIp, createRateLimiter } from "@/lib/server/rateLimit";
+import {
+  EXPLORE_BODY_MAX_CHARS,
+  EXPLORE_MAX_PER_WINDOW,
+  RATE_LIMITED_MESSAGE,
+  SEARCH_WINDOW_MS,
+  parseExploreBody,
+  retryAfterHeaders,
+} from "@/lib/server/searchRequest";
 
 // Proxy for the Python explore backend. POST { input } -> the backend's
 // { input, scope, tools_called, reasoning, sections } JSON. The backend exposes
@@ -42,48 +51,39 @@ import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBack
 //
 // Resilience contract: this route NEVER 500s the page. On any failure it returns
 // { sections: [], scope: {}, error: true } with HTTP 200 so the UI can render a
-// clean empty state instead of crashing.
+// clean empty state instead of crashing. Out-of-bounds input gets a 400 and too
+// many requests from one IP a 429 (with Retry-After); both carry a `message`
+// the UI shows instead of an empty state.
+
+const limiter = createRateLimiter(SEARCH_WINDOW_MS, EXPLORE_MAX_PER_WINDOW);
 
 export async function POST(req: Request) {
-  let input = "";
-  let personalize = true;
-  let projectId: string | undefined;
-  let sinceYear: number | undefined;
-  let statusFilter: string[] | undefined;
-  let onlyKinds: string[] | undefined;
-  // Optional per-source filters, forwarded as-is; the backend validates them
-  // (grant_open_only, grant_agencies, grant_sort, trial_location).
-  const sourceFilters: Record<string, unknown> = {};
-  try {
-    const body = await req.json();
-    if (body && typeof body.input === "string") input = body.input;
-    if (body && body.personalize === false) personalize = false;
-    if (body && typeof body.project_id === "string") projectId = body.project_id;
-    if (body && typeof body.since_year === "number" && Number.isFinite(body.since_year)) {
-      sinceYear = body.since_year;
-    }
-    if (body && Array.isArray(body.status_filter)) {
-      const cleaned = body.status_filter.filter((s: unknown): s is string => typeof s === "string" && s.trim() !== "");
-      if (cleaned.length > 0) statusFilter = cleaned;
-    }
-    // A chosen scope ("Grants"): the backend queries just these sources with the
-    // typed text instead of letting its router decide.
-    if (body && Array.isArray(body.only_kinds)) {
-      const kinds = body.only_kinds.filter((k: unknown): k is string => typeof k === "string" && k.trim() !== "");
-      if (kinds.length > 0) onlyKinds = kinds;
-    }
-    if (body && body.grant_open_only === true) sourceFilters.grant_open_only = true;
-    if (body && Array.isArray(body.grant_agencies)) {
-      const agencies = body.grant_agencies.filter((a: unknown): a is string => typeof a === "string" && a.trim() !== "");
-      if (agencies.length > 0) sourceFilters.grant_agencies = agencies;
-    }
-    if (body && body.grant_sort === "deadline") sourceFilters.grant_sort = "deadline";
-    if (body && typeof body.trial_location === "string" && body.trial_location.trim() !== "") {
-      sourceFilters.trial_location = body.trial_location.trim();
-    }
-  } catch {
-    // malformed body -> treat as empty input (backend serves the default feed)
+  if (limiter.limited(clientIp(req))) {
+    return NextResponse.json(
+      { sections: [], scope: {}, error: true, rate_limited: true, message: RATE_LIMITED_MESSAGE },
+      { status: 429, headers: retryAfterHeaders() }
+    );
   }
+
+  if (Number(req.headers.get("content-length") ?? 0) > EXPLORE_BODY_MAX_CHARS) {
+    return NextResponse.json({ sections: [], scope: {}, error: true, message: "Request is too large." }, { status: 400 });
+  }
+  let raw = "";
+  try {
+    raw = await req.text();
+  } catch {
+    // unreadable body -> treat as empty input (backend serves the default feed)
+  }
+  // A chosen scope (only_kinds, e.g. "Grants"): the backend queries just these
+  // sources with the typed text instead of letting its router decide.
+  const parsed = parseExploreBody(raw);
+  if (!parsed.ok) {
+    return NextResponse.json({ sections: [], scope: {}, error: true, message: parsed.message }, { status: 400 });
+  }
+  let input = parsed.input;
+  const { personalize, projectId, sinceYear, statusFilter, onlyKinds } = parsed;
+  // Optional per-source filters; the backend validates them too.
+  const sourceFilters = parsed.sourceFilters ?? {};
 
   if (projectId) {
     const result = await getProject(projectId);

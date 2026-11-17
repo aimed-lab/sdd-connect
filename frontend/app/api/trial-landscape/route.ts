@@ -1,32 +1,34 @@
 import { NextResponse } from "next/server";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
+import { clientIp, createRateLimiter } from "@/lib/server/rateLimit";
+import {
+  LANDSCAPE_BODY_MAX_CHARS,
+  LANDSCAPE_MAX_PER_WINDOW,
+  SEARCH_WINDOW_MS,
+  gateLandscapeRequest,
+} from "@/lib/server/searchRequest";
 
 // Proxy for the backend's trial landscape (#82). POST { query, status_filter?,
-// trial_location? } -> the grouped landscape JSON. Inputs are bounded here as
-// well as in the backend. Never 500s the page: on failure it returns an empty
-// landscape with error: true.
+// trial_location? } -> the grouped landscape JSON. Same limits pattern as
+// /api/explore: too many requests from one IP get a 429 with Retry-After, and
+// out-of-bounds input a 400, both with a `message`. Otherwise it never 500s the
+// page: on failure it returns an empty landscape with error: true.
 
-const MAX_QUERY = 200;
+const limiter = createRateLimiter(SEARCH_WINDOW_MS, LANDSCAPE_MAX_PER_WINDOW);
 
 export async function POST(req: Request) {
-  let query = "";
-  let statusFilter: string[] | undefined;
-  let location: string | undefined;
-  try {
-    const body = await req.json();
-    if (body && typeof body.query === "string") query = body.query.trim().slice(0, MAX_QUERY);
-    if (body && Array.isArray(body.status_filter)) {
-      const cleaned = body.status_filter
-        .filter((s: unknown): s is string => typeof s === "string" && /^[A-Za-z_]{2,40}$/.test(s.trim()))
-        .slice(0, 10);
-      if (cleaned.length > 0) statusFilter = cleaned;
-    }
-    if (body && typeof body.trial_location === "string" && body.trial_location.trim() !== "") {
-      location = body.trial_location.trim().slice(0, 100);
-    }
-  } catch {
-    // malformed body -> empty query
+  if (Number(req.headers.get("content-length") ?? 0) > LANDSCAPE_BODY_MAX_CHARS) {
+    return NextResponse.json({ groups: [], error: true, message: "Request is too large." }, { status: 400 });
   }
+  let raw = "";
+  try {
+    raw = await req.text();
+  } catch {
+    // unreadable body -> empty query
+  }
+  const gate = gateLandscapeRequest(limiter, clientIp(req), raw);
+  if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status, headers: gate.headers });
+  const { query, statusFilter, location } = gate.request;
 
   const empty = { query, total: null, fetched: 0, shown: 0, without_asset: 0, partial: false, exhaustive: false, groups: [] };
   if (!query) return NextResponse.json(empty);

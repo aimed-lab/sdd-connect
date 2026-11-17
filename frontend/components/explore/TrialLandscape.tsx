@@ -61,7 +61,7 @@ export default function TrialLandscape({
   if (!data || data.error) {
     return (
       <p className="font-body-md text-body-md text-secondary">
-        Couldn&apos;t load the landscape from ClinicalTrials.gov right now. Please try again in a moment.
+        {data?.message ?? "Couldn't load the landscape from ClinicalTrials.gov right now. Please try again in a moment."}
       </p>
     );
   }
