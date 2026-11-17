@@ -6,7 +6,7 @@
 import { getCurrentUser } from "@/lib/auth";
 import { listMemberRoster, listMyMemberships, searchCommunityMatches } from "@/lib/server/communities";
 import { viewerAccess } from "@/lib/server/communityHome/communityHome";
-import type { CommunityMatch } from "@/lib/server/assistant/communityMatch";
+import { matchReason, type CommunityMatch } from "@/lib/server/assistant/communityMatch";
 
 export async function matchCommunitiesForViewer(query: string): Promise<{ signedIn: boolean; matches: CommunityMatch[] }> {
   const user = await getCurrentUser();
@@ -44,6 +44,7 @@ export async function matchCommunitiesForViewer(query: string): Promise<{ signed
         isOpen: c.is_open,
         runBy,
         why: matched,
+        reason: matchReason(matched),
         state,
       };
     })

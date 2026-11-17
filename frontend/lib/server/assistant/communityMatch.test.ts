@@ -2,7 +2,18 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { matchAction, pickPeopleMatch, queryTokens, rankCommunities, MATCH_MIN_COVERAGE } from "./communityMatch.ts";
+import {
+  matchAction,
+  matchCommunityList,
+  matchReason,
+  pickPeopleMatch,
+  queryTokens,
+  rankCommunities,
+  MATCH_LIMIT,
+  MATCH_MIN_COVERAGE,
+  TOPIC_SYNONYMS,
+} from "./communityMatch.ts";
+import { visibleCommunities } from "../communityVisibility.ts";
 
 const c = (name: string, description: string | null, topics: string[] = []) => ({ name, description, explore_topics: topics });
 
@@ -90,4 +101,79 @@ test("pickPeopleMatch: the best community the viewer is NOT in; one they are in 
   assert.equal(pickPeopleMatch([m("a", "signed_out"), m("b", "signed_out")])?.id, "a");
   assert.equal(pickPeopleMatch([m("colabo", "active"), m("also", "active")])?.id, "colabo", "all member: show the best, as 'You're a member'");
   assert.equal(pickPeopleMatch([]), null, "nothing matches: the card stays hidden");
+});
+
+// The live communities' own wording (2026-11-17), with member counts.
+const site = (name: string, description: string, topics: string[], member_count: number) => ({
+  ...c(name, description, topics),
+  member_count,
+});
+const NEURO = site("UAB Neuro-oncology", "The UAB Neuro-oncology group's shared space for lab expertise, techniques, and resources.", [], 1);
+const FEST = site("CollaboFest 2026", "The annual cross-lab hackathon.", ["pancreatic ductal adenocarcinoma", "KRAS G12D inhibitor", "glioblastoma drug resistance", "tumor microenvironment immunotherapy"], 14);
+const HEREP = site("UAB HEREP", "Junior faculty and postdoctoral fellows in population and community-engaged health research.", ["ovarian cancer SPOP proteostasis", "lung cancer survivorship telerehabilitation veterans", "community health worker dementia detection"], 4);
+const AIMED = site("AI for Medicine", "A community for clinicians, researchers and engineers applying AI to diagnosis, treatment and patient care.", [], 1);
+const SITE = [AIMED, FEST, HEREP, NEURO];
+
+test("brain tumor glioblastoma research finds UAB Neuro-oncology through synonyms, with the reason", () => {
+  const r = matchCommunityList("brain tumor glioblastoma research", SITE);
+  const names = r.map((x) => x.community.name);
+  assert.ok(names.includes("UAB Neuro-oncology"));
+  assert.ok(names.includes("CollaboFest 2026"));
+  const neuro = r.find((x) => x.community === NEURO)!;
+  assert.deepEqual(neuro.matched, ["brain (neuro-oncology)", "tumor (oncology)", "glioblastoma (neuro-oncology)"]);
+  assert.equal(matchReason(neuro.matched), "Matched on: brain (neuro-oncology), tumor (oncology), glioblastoma (neuro-oncology)");
+});
+
+test("signed out, the visibility rule still hides a 1-member community from matches", () => {
+  const names = matchCommunityList("brain tumor glioblastoma research", visibleCommunities(SITE, false)).map((x) => x.community.name);
+  assert.ok(!names.includes("UAB Neuro-oncology"));
+  assert.ok(names.includes("CollaboFest 2026"));
+});
+
+test("the user's own word outranks a synonym", () => {
+  const [top] = matchCommunityList("glioblastoma", SITE);
+  assert.equal(top.community, FEST);
+  assert.deepEqual(top.matched, ["glioblastoma"]);
+});
+
+test("cancer reaches a neuro-oncology community; neuro-oncology still matches exactly", () => {
+  assert.ok(matchCommunityList("cancer", SITE).some((x) => x.community === NEURO));
+  const [top] = matchCommunityList("neuro-oncology", SITE);
+  assert.equal(top.community, NEURO);
+  assert.deepEqual(top.matched, ["neuro oncology"]);
+});
+
+test("a short query matches on one specific shared word, never on a broad one alone", () => {
+  // 2 words, only "dementia" (specific) shared: relaxed coverage applies.
+  assert.deepEqual(matchCommunityList("dementia genetics", SITE).map((x) => x.community), [HEREP]);
+  // Only the broad word "cancer" is shared with the other three: no relaxed match.
+  const r = rankCommunities("pancreatic cancer KRAS", ALL, { synonyms: true });
+  const kept = matchCommunityList("pancreatic cancer KRAS", ALL).map((x) => x.community.name);
+  assert.ok(r.some((x) => x.community.name === "Lung Cancer Genomics"));
+  assert.ok(!kept.includes("Lung Cancer Genomics"));
+  assert.ok(!kept.includes("Cancer Patients Network"));
+  // 4+ words keep the strict coverage.
+  assert.equal(queryTokens("dementia genetics sequencing biobank").length, 4);
+  assert.deepEqual(matchCommunityList("dementia genetics sequencing biobank", SITE), []);
+});
+
+test("unrelated queries match nothing; the result list is capped", () => {
+  assert.deepEqual(matchCommunityList("quantum chromodynamics", SITE), []);
+  assert.deepEqual(matchCommunityList("heart failure", SITE), []);
+  const many = Array.from({ length: 8 }, (_, i) => c(`Glioma Group ${i}`, null));
+  assert.equal(matchCommunityList("glioma", many).length, MATCH_LIMIT);
+  assert.equal(matchReason([]), "");
+});
+
+test("without the synonyms option, ranking is unchanged", () => {
+  assert.deepEqual(rankCommunities("brain tumor", [NEURO]), []);
+});
+
+test("every synonym target is a word some live community uses", () => {
+  const live = [
+    "neuro oncology", "glioblastoma", "oncology", "tumor", "cancer", "pancreatic", "dementia",
+    "smoking", "immunotherapy", "drug discovery",
+  ];
+  for (const targets of Object.values(TOPIC_SYNONYMS))
+    for (const t of targets) assert.ok(live.includes((t.toLowerCase().match(/[a-z0-9]+/g) ?? []).join(" ")), t);
 });

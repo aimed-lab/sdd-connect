@@ -6,6 +6,7 @@
 import type { Community, Membership } from "@/lib/server/communities";
 import { eyebrow, initials, plural, shortDate } from "@/lib/server/communityHome/communityHome";
 import JoinLeaveControl from "./JoinLeaveControl";
+import { JOIN_REVIEW_NOTE } from "@/lib/server/assistant/communityMatch";
 import CopyLinkButton from "./CopyLinkButton";
 import JoinQr from "./JoinQr";
 
@@ -80,6 +81,9 @@ export default function CommunityHeader({
               membership={membership}
               autoOpenJoin={autoOpenJoin}
             />
+          )}
+          {!inviteOnly && !community.is_open && membership.state !== "active" && (
+            <p className="font-body-sm text-body-sm text-secondary">{JOIN_REVIEW_NOTE}</p>
           )}
           <CopyLinkButton
             slug={community.slug}

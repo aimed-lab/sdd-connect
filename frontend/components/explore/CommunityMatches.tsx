@@ -7,7 +7,13 @@
 // existing join action; nothing here creates a community.
 
 import Link from "next/link";
-import { matchAction, type CommunityMatch } from "@/lib/server/assistant/communityMatch";
+import {
+  JOIN_REVIEW_NOTE,
+  matchAction,
+  matchReason,
+  SIGNED_OUT_MATCH_NOTE,
+  type CommunityMatch,
+} from "@/lib/server/assistant/communityMatch";
 
 export type MatchesState = {
   query: string;
@@ -47,9 +53,16 @@ export default function CommunityMatches({
   }
   if (state.matches.length === 0) {
     return (
-      <p className="font-body-md text-body-md text-on-background">
-        No existing community matches &ldquo;{state.query}&rdquo;.
-      </p>
+      <div className="flex flex-col gap-1">
+        <p className="font-body-md text-body-md text-on-background">
+          No existing community matches &ldquo;{state.query}&rdquo;.
+        </p>
+        {!state.signedIn && (
+          <Link href={loginHref} className="font-body-sm text-body-sm text-primary hover:underline underline-offset-4">
+            {SIGNED_OUT_MATCH_NOTE}
+          </Link>
+        )}
+      </div>
     );
   }
 
@@ -77,7 +90,10 @@ export default function CommunityMatches({
             </div>
             {m.purpose && <p className="font-body-sm text-body-sm text-on-background line-clamp-2">{m.purpose}</p>}
             {m.why.length > 0 && (
-              <p className="font-body-sm text-body-sm text-primary">Matches: {m.why.join(", ")}</p>
+              <p className="font-body-sm text-body-sm text-primary">{m.reason || matchReason(m.why)}</p>
+            )}
+            {!m.isOpen && m.state !== "active" && (
+              <p className="font-body-sm text-body-sm text-secondary">{JOIN_REVIEW_NOTE}</p>
             )}
 
             <div className="flex flex-wrap items-center gap-3 pt-0.5">
@@ -125,7 +141,12 @@ export default function CommunityMatches({
       })}
 
       {!state.signedIn && (
-        <p className="font-body-sm text-body-sm text-secondary">Sign in to join or create a community.</p>
+        <p className="font-body-sm text-body-sm text-secondary">
+          <Link href={loginHref} className="text-primary hover:underline underline-offset-4">
+            {SIGNED_OUT_MATCH_NOTE}
+          </Link>{" "}
+          Signing in also lets you join or create a community.
+        </p>
       )}
 
       <div className="rounded-xl border border-dashed border-primary bg-surface-container-low p-3.5 flex items-center gap-3">

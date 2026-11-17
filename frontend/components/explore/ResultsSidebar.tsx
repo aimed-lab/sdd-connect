@@ -11,7 +11,14 @@ import { joinCommunityAction } from "@/app/communities/actions";
 import { useAuth } from "@/context/AuthContext";
 import { followUpsFor } from "@/lib/server/assistant/assistantAnswer";
 import { openAssistant, saveAsLivingPageMessage } from "@/lib/server/assistant/assistantBridge";
-import { matchAction, pickPeopleMatch, type CommunityMatch } from "@/lib/server/assistant/communityMatch";
+import {
+  JOIN_REVIEW_NOTE,
+  matchAction,
+  matchReason,
+  pickPeopleMatch,
+  SIGNED_OUT_MATCH_NOTE,
+  type CommunityMatch,
+} from "@/lib/server/assistant/communityMatch";
 import { nextStepsFor } from "@/lib/server/explore/nextSteps";
 import type { ExploreSection } from "@/types/explore";
 
@@ -27,6 +34,7 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 function PeopleOnThis({ topic }: { topic: string }) {
   const { user } = useAuth();
   const [match, setMatch] = useState<CommunityMatch | null>(null);
+  const [checked, setChecked] = useState(false);
   const [done, setDone] = useState<"active" | "pending" | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +42,7 @@ function PeopleOnThis({ topic }: { topic: string }) {
   useEffect(() => {
     let cancelled = false;
     setMatch(null);
+    setChecked(false);
     setDone(null);
     (async () => {
       try {
@@ -45,7 +54,10 @@ function PeopleOnThis({ topic }: { topic: string }) {
         );
         // Prefer a community the viewer is not in yet.
         const best = pickPeopleMatch(valid);
-        if (!cancelled && best) setMatch(best);
+        if (!cancelled) {
+          if (best) setMatch(best);
+          setChecked(true);
+        }
       } catch {
         /* nothing matches, or the check failed: the card stays hidden */
       }
@@ -55,7 +67,20 @@ function PeopleOnThis({ topic }: { topic: string }) {
     };
   }, [topic]);
 
-  if (!match) return null;
+  const loginHref = `/login?callbackUrl=${encodeURIComponent(`/explore/${encodeURIComponent(topic)}`)}`;
+
+  if (!match) {
+    // Signed out, communities with few members are not listed; say so rather than show nothing.
+    if (!checked || user) return null;
+    return (
+      <Card title="People on this">
+        <p className="font-body-sm text-body-sm text-secondary">No listed community matches this topic yet.</p>
+        <Link href={loginHref} className="font-label-md text-label-md text-primary hover:underline underline-offset-4">
+          {SIGNED_OUT_MATCH_NOTE}
+        </Link>
+      </Card>
+    );
+  }
   const act = matchAction({ isOpen: match.isOpen, state: user ? match.state : "signed_out" });
 
   return (
@@ -68,7 +93,10 @@ function PeopleOnThis({ topic }: { topic: string }) {
           {match.memberCount} {match.memberCount === 1 ? "member" : "members"}
           {match.runBy ? ` · Run by ${match.runBy}` : ""}
         </p>
-        {match.why.length > 0 && <p className="font-body-sm text-body-sm text-primary">Matches: {match.why.join(", ")}</p>}
+        {match.why.length > 0 && <p className="font-body-sm text-body-sm text-primary">{match.reason || matchReason(match.why)}</p>}
+        {!match.isOpen && !(user && match.state === "active") && (
+          <p className="font-body-sm text-body-sm text-secondary">{JOIN_REVIEW_NOTE}</p>
+        )}
       </div>
       {done ? (
         <p className="font-label-md text-label-md text-primary">{done === "active" ? "You're in" : "Request sent"}</p>
@@ -96,12 +124,14 @@ function PeopleOnThis({ topic }: { topic: string }) {
           </Link>
         </p>
       ) : act.kind === "signin" ? (
-        <Link
-          href={`/login?callbackUrl=${encodeURIComponent(`/explore/${encodeURIComponent(topic)}`)}`}
-          className="btn-primary self-start px-4 py-2 rounded-lg font-label-md text-label-md"
-        >
-          {act.label}
-        </Link>
+        <>
+          <Link href={loginHref} className="btn-primary self-start px-4 py-2 rounded-lg font-label-md text-label-md">
+            {act.label}
+          </Link>
+          <Link href={loginHref} className="font-body-sm text-body-sm text-primary hover:underline underline-offset-4">
+            {SIGNED_OUT_MATCH_NOTE}
+          </Link>
+        </>
       ) : (
         <p className="font-label-md text-label-md text-secondary">{act.label}</p>
       )}
