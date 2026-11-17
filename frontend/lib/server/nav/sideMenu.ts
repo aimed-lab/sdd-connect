@@ -30,13 +30,24 @@ export const DISCOVER: MenuItem[] = [
   { label: "Promote", href: "/promote", icon: "campaign", description: "Share a paper or a result" },
   { label: "Events", href: "/events", icon: "event", description: "Conferences and contests" },
   { label: "Communities", href: "/communities", icon: "groups", description: "Researchers in your area" },
-  { label: "CollaboFest 2026", href: "/programs/colabofest-2026", icon: "emoji_events", description: "Timeline and finalists" },
+  { label: "CollaboFest 2026", href: "/communities/colabofest-2026", icon: "emoji_events", description: "SPARC's drug discovery challenge" },
 ];
 
-/** The groups in order. "My work" is for signed-in people only. */
-export function menuGroups(signedIn: boolean): MenuGroup[] {
+/** The CollaboFest project dashboard. Only for leads and managers of a
+ *  CollaboFest project (anyone else gets a 404 there). */
+export const PROGRAM_ITEM: MenuItem = {
+  label: "CollaboFest 2026 projects",
+  href: "/programs/colabofest-2026",
+  icon: "monitoring",
+  tint: { fg: "#7a2e4d", bg: "#f5e4ec" },
+};
+
+/** The groups in order. "My work" is for signed-in people only; the program
+ *  dashboard is added to it for CollaboFest leads and managers. */
+export function menuGroups(signedIn: boolean, programAccess = false): MenuGroup[] {
   const discover = { title: "Discover", items: DISCOVER };
-  return signedIn ? [{ title: "My work", items: MY_WORK }, discover] : [discover];
+  if (!signedIn) return [discover];
+  return [{ title: "My work", items: programAccess ? [...MY_WORK, PROGRAM_ITEM] : MY_WORK }, discover];
 }
 
 /** The pinned bottom of the menu: who is signed in (a link to Settings, the

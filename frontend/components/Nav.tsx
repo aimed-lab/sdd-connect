@@ -79,10 +79,37 @@ function useUnseenInbox(signedIn: boolean, pathname: string) {
   return count;
 }
 
+/** Whether the signed-in person leads or manages a CollaboFest project, so the
+ *  side menu can link the program dashboard. False until known, and on any error. */
+function useProgramAccess(userId: string | null) {
+  const [access, setAccess] = useState(false);
+
+  useEffect(() => {
+    setAccess(false);
+    if (!userId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/programs/colabofest-2026/access", { cache: "no-store" });
+        const json = await res.json();
+        if (!cancelled) setAccess(json?.access === true);
+      } catch {
+        // Without it the menu just leaves the dashboard link out.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  return access;
+}
+
 export default function Nav() {
   const pathname = usePathname();
   const { user, displayName, signOut } = useAuth();
   const unseen = useUnseenInbox(!!user, pathname);
+  const programAccess = useProgramAccess(user?.id ?? null);
   const [sideOpen, setSideOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const onMenuEvent = useCallback((event: MenuEvent) => setSideOpen((open) => nextOpen(open, event)), []);
@@ -185,6 +212,7 @@ export default function Nav() {
         open={sideOpen}
         pathname={pathname}
         signedIn={!!user}
+        programAccess={programAccess}
         name={displayName}
         onEvent={onMenuEvent}
         onSignOut={signOut}
