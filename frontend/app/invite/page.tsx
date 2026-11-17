@@ -7,6 +7,8 @@ import InviteForm from "@/components/invite/InviteForm";
 import PageHeader, { PageShell } from "@/components/PageHeader";
 import { interestFromParam } from "@/lib/inviteTypes";
 
+export const metadata = { title: "Request an invite" };
+
 export default async function InvitePage({
   searchParams,
 }: {

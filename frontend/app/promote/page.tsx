@@ -22,6 +22,8 @@ import { listShowcase } from "@/lib/server/showcase";
 import { pickFeatured } from "@/lib/server/promote/showcaseKinds";
 import { SHOWCASE_TYPES, SHOWCASE_TYPE_LABEL, type ShowcaseType } from "@/lib/showcaseTypes";
 
+export const metadata = { title: "Promote" };
+
 export const dynamic = "force-dynamic";
 
 function chip(active: boolean) {

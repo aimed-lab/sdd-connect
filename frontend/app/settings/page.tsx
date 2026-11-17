@@ -13,6 +13,8 @@ import { redirect } from "next/navigation";
 import SettingsPanels from "@/components/profile/SettingsPanels";
 import { getCurrentUser } from "@/lib/auth";
 
+export const metadata = { title: "Settings" };
+
 export const dynamic = "force-dynamic"; // depends on the session
 
 export default async function SettingsPage() {

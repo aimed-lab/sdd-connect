@@ -2,7 +2,7 @@
 
 import PageHeader, { PageShell } from "@/components/PageHeader";
 
-export const metadata = { title: "Contact — SmartDrugDiscovery" };
+export const metadata = { title: "Contact" };
 
 export default function ContactPage() {
   return (

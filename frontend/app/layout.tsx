@@ -19,7 +19,7 @@ const newsreader = Newsreader({
 });
 
 export const metadata: Metadata = {
-  title: "SmartDrugDiscovery",
+  title: { default: "SmartDrugDiscovery", template: "%s · SmartDrugDiscovery" },
   description:
     "Explore, Build, Promote — one platform for the drug-discovery community.",
 };
@@ -41,9 +41,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="min-h-screen flex flex-col bg-background text-on-background font-body-md">
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[100] focus:px-4 focus:py-2 focus:rounded-lg focus:bg-surface-container-lowest focus:text-on-background focus:shadow-lg focus:outline focus:outline-2 focus:outline-primary"
+        >
+          Skip to content
+        </a>
         <AuthProvider>
           <Nav />
-          <main className="flex-1 pt-16 max-sm:pb-24">{children}</main>
+          <main id="main-content" tabIndex={-1} className="flex-1 pt-16 max-sm:pb-24 focus:outline-none">
+            {children}
+          </main>
           <Footer />
           {/* Floating, out of normal flow — available on every page, unlike
               the per-page card it replaced. See its own docstring. */}

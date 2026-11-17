@@ -28,7 +28,7 @@ import { projectCode, sortMyProjects } from "@/lib/server/projectWorkspace/progr
 
 export const dynamic = "force-dynamic"; // depends on the session
 
-export const metadata = { title: "Your projects · SmartDrugDiscovery" };
+export const metadata = { title: "Your projects" };
 
 export default async function ProjectsPage({
   searchParams,

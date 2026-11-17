@@ -41,6 +41,8 @@ import { listResources } from "@/lib/server/collaborate";
 import { listCommunities } from "@/lib/server/communities";
 import { listMyTeamsNewest } from "@/lib/server/teams/teams";
 
+export const metadata = { title: "Collaborate" };
+
 export const dynamic = "force-dynamic"; // board content changes per request
 
 const FILTERS: { value: BoardFilter; label: string }[] = [

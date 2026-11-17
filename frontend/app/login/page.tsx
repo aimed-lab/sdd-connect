@@ -20,6 +20,18 @@ import { useSearchParams } from "next/navigation";
 import { ssoLoginAction } from "@/app/auth/actions";
 import { postLoginPath } from "@/lib/safeRedirect";
 
+function LoginHeader() {
+  return (
+    <header className="text-center">
+      <h1 className="font-headline-lg text-headline-lg text-on-background">Welcome back</h1>
+      <p className="mt-3 font-body-md text-body-md text-secondary">
+        Sign in with your SmartDrugDiscovery account to comment, collaborate and submit your
+        work.
+      </p>
+    </header>
+  );
+}
+
 function LoginForm() {
   const searchParams = useSearchParams();
   const callbackUrl = postLoginPath(searchParams.get("callbackUrl"));
@@ -45,13 +57,7 @@ function LoginForm() {
 
   return (
     <div className="max-w-md mx-auto px-margin-mobile md:px-margin-desktop py-16 md:py-24">
-      <header className="text-center">
-        <h1 className="font-headline-lg text-headline-lg text-on-background">Welcome back</h1>
-        <p className="mt-3 font-body-md text-body-md text-secondary">
-          Sign in with your SmartDrugDiscovery account to comment, collaborate and submit your
-          work.
-        </p>
-      </header>
+      <LoginHeader />
 
       <div className="glass-panel rounded-2xl p-8 mt-8">
         {ssoFailed && (
@@ -100,7 +106,13 @@ export default function LoginPage() {
   // useSearchParams must sit inside <Suspense> — see the "use client" boundary
   // rule in CLAUDE.md.
   return (
-    <Suspense>
+    <Suspense
+      fallback={
+        <div className="max-w-md mx-auto px-margin-mobile md:px-margin-desktop py-16 md:py-24">
+          <LoginHeader />
+        </div>
+      }
+    >
       <LoginForm />
     </Suspense>
   );

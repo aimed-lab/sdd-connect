@@ -9,7 +9,7 @@ import DeletedNotice, { wasDeleted } from "@/components/DeletedNotice";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
-export const metadata = { title: "Your teams · SmartDrugDiscovery" };
+export const metadata = { title: "Your teams" };
 
 export default async function TeamsPage({
   searchParams,

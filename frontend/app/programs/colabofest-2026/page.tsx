@@ -20,7 +20,7 @@ import { STALE_ANNOUNCEMENT_LABEL, programCountLine, type TaskStatus } from "@/l
 import { tabHref } from "@/lib/server/projectWorkspace/workspace";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "CollaboFest 2026 projects | SmartDrugDiscovery", robots: { index: false } };
+export const metadata: Metadata = { title: "CollaboFest 2026 projects", robots: { index: false } };
 
 // The tasks part of the status line: red-brown when overdue, amber when due today.
 const TASK_TONE: Record<TaskStatus["tone"], string> = {

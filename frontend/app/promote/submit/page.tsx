@@ -15,6 +15,8 @@ import SubmitFlow from "@/components/promote/SubmitFlow";
 import { getCurrentUser } from "@/lib/auth";
 import { listMyActiveCommunities } from "@/lib/server/communities";
 
+export const metadata = { title: "Submit to the showcase" };
+
 export const dynamic = "force-dynamic"; // depends on the session
 
 export default async function SubmitShowcasePage({
