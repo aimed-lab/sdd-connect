@@ -148,6 +148,10 @@ function SearchResults() {
   const scope = scopeFromParam(categoryParam);
   const scoped = scope !== "all";
   const [selected, setSelected] = useState<string | null>(null);
+  // Papers tab order: newest first (default) or "Most relevant" (typed searches).
+  const [paperSort, setPaperSort] = useState<"newest" | "relevant">("newest");
+  // Bumped by "Retry" on a source that didn't respond in time.
+  const [retryNonce, setRetryNonce] = useState(0);
 
   // FIRST LOAD ONLY: when arriving with a projectId (from "Explore for this
   // project" — see lib/projectTypes.ts:buildProjectExploreHref), `topic` is
@@ -199,12 +203,22 @@ function SearchResults() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- projectId is
     // read once via isFirstLoadRef, not meant to re-trigger this effect
-  }, [topic, trialStatusParam, scope]);
+  }, [topic, trialStatusParam, scope, retryNonce]);
 
   const sections = useMemo(() => visibleSections(data), [data]);
   const sectionOf = (kind: string) => sections.find((s) => s.kind === kind);
   const itemsOf = (kind: string): ExploreItem[] => sectionOf(kind)?.items ?? [];
   const totalItems = sections.reduce((n, s) => n + s.items.length, 0);
+  // Sources that didn't answer before the backend's deadline. Shown as their
+  // own "didn't respond in time" state with a retry, never as an empty list.
+  const timedOut = sections.filter((s) => s.timed_out && s.items.length === 0);
+  const retry = () => setRetryNonce((n) => n + 1);
+  // A single-type view of a timed-out source shows its own card instead.
+  const viewKind = scoped ? scope : selected;
+  const showSlowBanner =
+    timedOut.length > 0 &&
+    !(viewKind && timedOut.some((s) => s.kind === viewKind) && sections.every((s) => s.kind !== viewKind || s.items.length === 0));
+  const kindName = (kind: string) => labelForKind(kind) || kind.charAt(0).toUpperCase() + kind.slice(1);
 
   // Two DISTINCT settled failure shapes, never conflated:
   //   backendError — the search never actually ran (transport failure, or the
@@ -216,7 +230,7 @@ function SearchResults() {
   //                  sources, which backendError is not.
   // Both are "settled" (not loading) and mutually exclusive.
   const backendError = !loading && (failed || data?.error === true);
-  const emptyResult = !loading && !backendError && totalItems === 0;
+  const emptyResult = !loading && !backendError && totalItems === 0 && timedOut.length === 0;
   const showError = backendError || emptyResult;
 
   // Auto-capture: page_path + the query, tagged with which of the two
@@ -276,7 +290,25 @@ function SearchResults() {
     if (typeof window !== "undefined") window.scrollTo({ top: 0 });
   };
 
-  const emptyCategory = (kind: string) => (
+  const timedOutCard = (kind: string) => (
+    <div className="rounded-[14px] bg-[#eeece6] max-w-xl mx-auto text-center px-8 py-14">
+      <span className="material-symbols-outlined text-5xl text-secondary/50">hourglass_empty</span>
+      <h3 className="mt-4 font-title text-[24px] font-medium text-on-background">
+        {`${kindName(kind)} didn’t respond in time`}
+      </h3>
+      <p className="mt-2 text-secondary font-body-md">
+        The source was slow, not empty. It usually answers on a second try.
+      </p>
+      <div className="mt-6 flex justify-center">
+        <button type="button" onClick={retry} className="btn-primary px-6 py-2 rounded-lg font-label-md text-label-md">
+          Retry
+        </button>
+      </div>
+    </div>
+  );
+
+  const emptyCategory = (kind: string) =>
+    sections.some((s) => s.kind === kind && s.timed_out) ? timedOutCard(kind) : (
     <CategoryEmptyCard
       label={labelForKind(kind)}
       kind={kind}
@@ -284,7 +316,7 @@ function SearchResults() {
       failed={!!sections.find((s) => s.kind === kind && !!s.error)}
       onBrowseAll={() => setSelected(null)}
     />
-  );
+    );
 
   const resourceSection = (kind: "dataset" | "tool", title: string) => {
     const items = itemsOf(kind);
@@ -312,6 +344,21 @@ function SearchResults() {
     );
   };
 
+  const fdaNote = (kind: string) => {
+    const note = sectionOf(kind)?.note;
+    if (!note) return null;
+    return (
+      <p className="mt-4 font-body-sm text-body-sm text-secondary">
+        {note.text}{" "}
+        {note.url && (
+          <a href={note.url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline underline-offset-4">
+            Drugs@FDA ↗
+          </a>
+        )}
+      </p>
+    );
+  };
+
   const approvalSection = () => {
     const items = itemsOf("approval");
     if (items.length === 0) return null;
@@ -319,13 +366,14 @@ function SearchResults() {
       <section key="approval">
         <SectionHeading
           title="FDA-approved drugs"
-          subtitle="Drugs whose FDA label mentions this condition."
+          subtitle="Drugs whose FDA label names this drug or condition."
         />
         <div className={TILE_GRID}>
           {items.map((item) => (
             <ApprovalTile key={item.id} item={item} projectId={projectId} />
           ))}
         </div>
+        {fdaNote("approval")}
       </section>
     );
   };
@@ -400,15 +448,49 @@ function SearchResults() {
 
   const selectedView = (kind: string) => {
     const section = sectionOf(kind);
-    if (!section || section.items.length === 0) return emptyCategory(kind);
+    if (!section || section.items.length === 0) {
+      return (
+        <div>
+          {emptyCategory(kind)}
+          {kind === "approval" && <div className="max-w-xl mx-auto text-center">{fdaNote("approval")}</div>}
+        </div>
+      );
+    }
 
     if (kind === "paper") {
       const key = section.items_key ?? [];
+      const relevant = section.items_relevant ?? [];
+      const byRelevance = paperSort === "relevant" && relevant.length > 0;
       return (
         <div className="space-y-14">
           <section>
             <SectionHeading title="Papers" />
-            <PaperList items={section.items} projectId={projectId} />
+            {relevant.length > 0 && (
+              <div role="group" aria-label="Sort papers" className="mb-4 inline-flex items-center gap-1 p-1 rounded-lg bg-surface-container-low border border-outline-variant/30 w-fit">
+                {(
+                  [
+                    ["newest", "Newest first"],
+                    ["relevant", "Most relevant"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={paperSort === value}
+                    onClick={() => setPaperSort(value)}
+                    className={
+                      "px-3 py-1.5 rounded-md font-label-md text-label-md whitespace-nowrap transition-all " +
+                      (paperSort === value
+                        ? "bg-secondary-container text-on-secondary-container font-semibold shadow-sm"
+                        : "text-secondary hover:text-on-background")
+                    }
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <PaperList items={byRelevance ? relevant : section.items} projectId={projectId} />
           </section>
           {key.length > 0 && (
             <section>
@@ -588,6 +670,19 @@ function SearchResults() {
                     />
                   </div>
                 )}
+              </div>
+            )}
+
+            {!loading && !showError && showSlowBanner && (
+              <div role="status" className="mb-8 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-[14px] bg-[#eeece6] px-5 py-4">
+                <span className="material-symbols-outlined text-secondary">hourglass_empty</span>
+                <p className="flex-1 min-w-[12rem] font-body-sm text-body-sm text-on-background">
+                  {`${timedOut.map((s) => kindName(s.kind)).join(", ")} didn’t respond in time.`}
+                  {totalItems > 0 ? " The other results are below." : ""}
+                </p>
+                <button type="button" onClick={retry} className="font-label-md text-label-md text-primary hover:underline underline-offset-4">
+                  Retry
+                </button>
               </div>
             )}
 

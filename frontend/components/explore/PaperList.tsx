@@ -48,6 +48,11 @@ export default function PaperList({
                 {item.title}
               </h3>
               {authors && <p className="mt-1 text-sm text-secondary truncate">{authors}</p>}
+              {item.abstract && (
+                <p className="mt-1.5 text-[13px] leading-snug text-on-background/70 line-clamp-2">
+                  {item.abstract}
+                </p>
+              )}
             </>
           );
           return (

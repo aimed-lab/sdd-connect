@@ -643,6 +643,26 @@ async def explore_http(request):
     (input, scope, tools_called, reasoning, sections). Never 500s the caller:
     on failure it returns the empty-sections shape with HTTP 200.
 
+    Optional `only_kinds`: run just these result kinds, skipping the router:
+      paper     PubMed/OpenAlex/Crossref (items: newest first; items_key: Key
+                papers; items_relevant: "Most relevant", typed searches only;
+                each item may carry a verbatim `abstract` excerpt)
+      preprint  Europe PMC preprints
+      news      biopharma RSS headlines
+      trial     ClinicalTrials.gov
+      approval  openFDA (raw.indication_first_sentence; section `note` links
+                Drugs@FDA because FDA data can lag)
+      grant     Grants.gov
+      tool      GitHub repositories (open-source software). raw holds only
+                license_spdx, language, topics and pushed_at (the last code
+                push, not a release date); signal is the star count
+      dataset   NCBI GEO series (skipped, empty_reason "tool_query", for a
+                software question that names no data)
+      geneset   PAGER gene sets      compound  ChEMBL      target  Open Targets
+      resource / person / episode    internal lab registry, people, podcast wiki
+    Every section may carry `timed_out: true` / `empty_reason: "timed_out"`
+    when its source missed the request deadline (EXPLORE_DEADLINE_SEC).
+
     Optional `scope`: a list of terms that PERSONALIZES the blank-input landing
     feed (the Next proxy fills it from the signed-in user's saved interests —
     this service never sees a user id, and the terms are only ever a scope, so

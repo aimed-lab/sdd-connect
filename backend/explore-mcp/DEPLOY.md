@@ -108,6 +108,9 @@ GITHUB_TOKEN=
 PREWARM_ENABLED=
 PREWARM_INTERVAL_SEC=
 PREWARM_TIMEOUT_SEC=
+PREWARM_TOPICS=
+PREWARM_TOPICS_INTERVAL_SEC=
+EXPLORE_DEADLINE_SEC=
 MCP_HOST=
 MCP_PORT=
 LOG_LEVEL=
@@ -387,6 +390,9 @@ project's credentials, never invent or reuse a value from another project.
 | `PREWARM_ENABLED` | Optional | Whether to pre-fetch the default landing-page results on startup. Defaults on. |
 | `PREWARM_INTERVAL_SEC` | Optional | How often the pre-fetch refreshes. Has a built-in default. |
 | `PREWARM_TIMEOUT_SEC` | Optional | Max time one pre-fetch attempt may run before being treated as failed. Has a built-in default. |
+| `PREWARM_TOPICS` | Optional | Comma-separated popular topics whose source results are pre-fetched in the background, one at a time, without any LLM call (at most 10 are used). Unset uses a built-in list; `0` turns it off. |
+| `PREWARM_TOPICS_INTERVAL_SEC` | Optional | How often the popular topics are refreshed. Defaults to 25 minutes. |
+| `EXPLORE_DEADLINE_SEC` | Optional | How long one search waits for its sources before marking the slow ones "didn't respond in time" and answering with the rest. Defaults to 25 s. Keep it well below the Next.js proxy's `maxDuration` (60 s in `frontend/app/api/explore/route.ts`). |
 | `MCP_HOST` | Optional | Which network interface to bind to. Defaults to all interfaces — leave unset in a container. |
 | `MCP_PORT` | Optional | Which port to listen on. Defaults to `8000`. |
 | `LOG_LEVEL` | Optional | Log verbosity (`DEBUG`/`INFO`/`WARNING`/`ERROR`). Defaults to `INFO`. |

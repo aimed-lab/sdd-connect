@@ -44,6 +44,15 @@ import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBack
 // { sections: [], scope: {}, error: true } with HTTP 200 so the UI can render a
 // clean empty state instead of crashing.
 
+// TIME BUDGET. The backend stops waiting for slow sources at its own deadline
+// (EXPLORE_DEADLINE_SEC, 25 s by default — see backend/explore-mcp/tools/
+// explore.py) and marks them `timed_out`, so the page gets the other results
+// plus a "didn't respond in time — retry" state. This route allows 60 s and
+// gives up on the backend after 55 s, so even a stalled backend ends in the
+// error shape below rather than a platform timeout.
+export const maxDuration = 60;
+const BACKEND_TIMEOUT_MS = 55_000;
+
 export async function POST(req: Request) {
   let input = "";
   let personalize = true;
@@ -104,6 +113,7 @@ export async function POST(req: Request) {
       method: "POST",
       headers: exploreBackendHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(BACKEND_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`explore backend responded ${res.status}`);
     const data = await res.json();

@@ -76,10 +76,18 @@ def test_only_grants_queries_grants_with_the_typed_text(stubs):
 
 
 def test_only_preprints_and_fda_are_reachable(stubs):
-    result = asyncio.run(te.explore_async("KRAS lung", only_kinds=["preprint", "approval"]))
+    result = asyncio.run(te.explore_async("KRAS lung cancer", only_kinds=["preprint", "approval"]))
 
     assert sorted(c[0] for c in stubs) == ["search_fda", "search_preprints"]
     assert sorted(s["kind"] for s in result["sections"]) == ["approval", "preprint"]
+
+
+def test_pure_gene_question_runs_no_fda_label_search(stubs):
+    result = asyncio.run(te.explore_async("KRAS lung", only_kinds=["preprint", "approval"]))
+
+    assert [c[0] for c in stubs] == ["search_preprints"]
+    approval = next(s for s in result["sections"] if s["kind"] == "approval")
+    assert approval["items"] == [] and approval["empty_reason"] == "no_query"
 
 
 def test_tools_and_datasets_scope_runs_both(stubs):

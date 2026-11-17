@@ -82,8 +82,8 @@ def env(monkeypatch):
         calls.append(("trials_gene", condition, {"gene": gene, "status": status_filter}))
         return await trials(condition, limit, status_filter, condition_only=True)
 
-    async def fda(query, limit=20):
-        calls.append(("fda", query, {}))
+    async def fda(query, limit=20, by="indication"):
+        calls.append(("fda", query, {"by": by}))
         return [SOTORASIB] if query.lower() == "kras g12c" else []
 
     async def preprints(query, limit=20):
@@ -171,8 +171,10 @@ def test_admet_prediction_tools_and_databases(env):
 
     assert _queries(env["calls"], "tools") == ["ADMET prediction"]
     assert [i["title"] for i in _section(result, "tool")["items"]] == ["admet-ai"]
+    # A software question with no data words: GEO is not searched (issue #68).
     dataset = _section(result, "dataset")
-    assert dataset["items"] == [] and dataset["empty_reason"] == "no_results"
+    assert dataset["items"] == [] and dataset["empty_reason"] == "tool_query"
+    assert _queries(env["calls"], "datasets") == []
     assert "fallback_query" not in dataset   # the entity IS the query; nothing shorter to try
 
 
@@ -196,8 +198,12 @@ def test_oral_pcsk9_inhibitors_competitive_landscape(env):
     assert [i["title"] for i in trial["items"]] == ["MK-0616 lipid lowering"]
     assert trial["fallback_query"] == "PCSK9"
     assert trial["filtered_out"] == 1
+    # A pure gene/target question runs no label search (issue #65): label
+    # indications name diseases, not targets.
     approval = _section(result, "approval")
-    assert approval["items"] == [] and approval["empty_reason"] == "no_results"
+    assert approval["items"] == [] and approval["empty_reason"] == "no_query"
+    assert approval["note"]["url"].startswith("https://www.accessdata.fda.gov/")
+    assert _queries(env["calls"], "fda") == []
     news = _section(result, "news")
     assert news["items"] == [] and news["empty_reason"] == "off_topic_filtered"
     assert _section(result, "paper")["items"]          # papers are never gated
