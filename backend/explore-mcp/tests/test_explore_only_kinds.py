@@ -3,8 +3,9 @@ tests/test_explore_only_kinds.py — the optional `only_kinds` restriction on ex
 
 A user who picks a scope ("Grants") must get THAT source queried with their text,
 even when the LLM router would not have chosen it. No network, no Groq: the
-per-source functions are stubbed, and the scope/route steps are made to explode
-if they are ever reached.
+per-source functions are stubbed, the router is made to explode if it is ever
+reached, and the scope extraction raises (a Groq outage), so these also cover the
+deterministic fallback.
 """
 
 from __future__ import annotations
@@ -46,10 +47,13 @@ def stubs(monkeypatch):
     monkeypatch.setattr(te, "search_tools_async", make("search_tools", "tool"))
     monkeypatch.setattr(te, "search_datasets_async", make("search_datasets", "dataset"))
 
-    def boom(*a, **k):
-        raise AssertionError("scope extraction / routing must not run for only_kinds")
+    def outage(*a, **k):
+        raise RuntimeError("LLM unavailable")
 
-    monkeypatch.setattr(te, "_extract_scope", boom)
+    def boom(*a, **k):
+        raise AssertionError("routing must not run for only_kinds")
+
+    monkeypatch.setattr(te, "_extract_scope", outage)
     monkeypatch.setattr(te, "_choose_tools", boom)
     return calls
 
@@ -140,18 +144,26 @@ def kw_stubs(monkeypatch):
             return [_item(kind, f"{kind} for {query}")]
         return fn
 
+    def outage(*a, **k):
+        raise RuntimeError("LLM unavailable")
+
     monkeypatch.setattr(te, "search_grants_async", make("search_grants", "grant"))
     monkeypatch.setattr(te, "search_trials_async", make("search_trials", "trial"))
+    monkeypatch.setattr(te, "_extract_scope", outage)
     return calls
+
+
+def _filter_kwargs(kwargs: dict) -> dict:
+    return {k: v for k, v in kwargs.items() if k in ("open_only", "agencies", "sort", "location")}
 
 
 def test_only_grants_with_filters_forwards_them(kw_stubs):
     asyncio.run(te.explore_async(
-        "drug discovery", only_kinds=["grant"],
+        "AI in health", only_kinds=["grant"],
         source_filters={"grant_open_only": True, "grant_agencies": ["NIH"], "grant_sort": "deadline"},
     ))
-    assert kw_stubs == [("search_grants", "drug discovery",
-                         {"open_only": True, "agencies": ["NIH"], "sort": "deadline"})]
+    assert [(n, q, _filter_kwargs(k)) for n, q, k in kw_stubs] == [
+        ("search_grants", "AI in health", {"open_only": True, "agencies": ["NIH"], "sort": "deadline"})]
 
 
 def test_only_trials_with_location_forwards_it(kw_stubs):
@@ -165,7 +177,7 @@ def test_filtered_and_unfiltered_searches_are_cached_separately(kw_stubs):
                                  source_filters={"grant_open_only": True}))
     asyncio.run(te.explore_async("filter cache probe", only_kinds=["grant"],
                                  source_filters={"grant_open_only": True}))
-    assert [c[2] for c in kw_stubs] == [{}, {"open_only": True}]
+    assert [_filter_kwargs(c[2]) for c in kw_stubs] == [{}, {"open_only": True}]
 
 
 def test_routed_search_passes_filters_to_grants_and_trials(monkeypatch):
