@@ -159,11 +159,11 @@ def _filter_kwargs(kwargs: dict) -> dict:
 
 def test_only_grants_with_filters_forwards_them(kw_stubs):
     asyncio.run(te.explore_async(
-        "AI in health", only_kinds=["grant"],
+        "drug discovery", only_kinds=["grant"],
         source_filters={"grant_open_only": True, "grant_agencies": ["NIH"], "grant_sort": "deadline"},
     ))
     assert [(n, q, _filter_kwargs(k)) for n, q, k in kw_stubs] == [
-        ("search_grants", "AI in health", {"open_only": True, "agencies": ["NIH"], "sort": "deadline"})]
+        ("search_grants", "drug discovery", {"open_only": True, "agencies": ["NIH"], "sort": "deadline"})]
 
 
 def test_only_trials_with_location_forwards_it(kw_stubs):
