@@ -5,7 +5,9 @@
 // (lib/server/wiki.ts) and only the matches and snippets reach the browser.
 //
 // A term matches a word when it is a PREFIX of it ("deliv" finds "delivery",
-// but "ai" does not match inside "available"); every term must match somewhere
+// but "ai" does not match inside "available"). A short word term (three letters
+// or fewer, like "ALS" or "AI") must be the whole word, so "ALS" does not find
+// "also"; every term must match somewhere
 // in the episode (AND), and the terms may be in different fields.
 
 export type SearchableEpisode = {
@@ -60,11 +62,19 @@ function words(text: string): Word[] {
   return out;
 }
 
-const hasTerm = (ws: Word[], term: string) => ws.some((w) => w.word.startsWith(term));
+/** Whether a word matches a term: a prefix match, except that a short
+ *  alphabetic term must be the whole word (or its plural). Numbers stay
+ *  prefix matches ("33" still finds "334"). */
+export function wordMatches(word: string, term: string): boolean {
+  if (term.length <= 3 && /[a-z]/.test(term)) return word === term || word === term + "s";
+  return word.startsWith(term);
+}
 
-/** The index of the first word that starts with any of the terms, or -1. */
+const hasTerm = (ws: Word[], term: string) => ws.some((w) => wordMatches(w.word, term));
+
+/** The index of the first word that matches any of the terms, or -1. */
 function firstHit(ws: Word[], terms: string[]): number {
-  return ws.findIndex((w) => terms.some((t) => w.word.startsWith(t)));
+  return ws.findIndex((w) => terms.some((t) => wordMatches(w.word, t)));
 }
 
 const SNIPPET_RADIUS = 90;
@@ -95,7 +105,7 @@ export function highlightParts(text: string, terms: string[]): { text: string; h
   const parts: { text: string; hit: boolean }[] = [];
   let last = 0;
   for (const w of words(text)) {
-    if (terms.some((t) => w.word.startsWith(t))) {
+    if (terms.some((t) => wordMatches(w.word, t))) {
       if (w.start > last) parts.push({ text: text.slice(last, w.start), hit: false });
       parts.push({ text: text.slice(w.start, w.end), hit: true });
       last = w.end;

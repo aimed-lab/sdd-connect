@@ -168,6 +168,20 @@ test("matching is by word prefix, not by substring", () => {
   assert.deepEqual(searchEpisodes([ep(1, { transcript: "an available domain" })], "ai"), [], "'ai' is not inside 'available'");
 });
 
+test("a short term like ALS matches the whole word only, not 'also' or 'trials'", () => {
+  const list = [
+    ep(1, { title: "Running trials", description: "We also cover models.", transcript: "Trials, also, alsace." }),
+    ep(2, { title: "Living with ALS", transcript: "ALS patients and their families." }),
+    ep(3, { description: "Drug development for amyotrophic lateral sclerosis (ALS)." }),
+  ];
+  assert.deepEqual(searchEpisodes(list, "ALS").map((h) => h.slug), ["ep-2", "ep-3"]);
+  assert.deepEqual(searchEpisodes([ep(4, { transcript: "Two AIs talked." })], "ai").map((h) => h.slug), ["ep-4"], "a plural still matches");
+  assert.deepEqual(highlightParts("ALS is not also", ["als"]), [
+    { text: "ALS", hit: true },
+    { text: " is not also", hit: false },
+  ]);
+});
+
 test("title matches rank above description/topics, which rank above transcript-only", () => {
   const list = [
     ep(1, { title: "Other", transcript: "we mention sepsis once" }),

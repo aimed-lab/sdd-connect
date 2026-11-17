@@ -38,6 +38,7 @@ import SectionHeading from "@/components/explore/SectionHeading";
 import { BlockSkeleton, PageSkeleton } from "@/components/explore/Skeletons";
 import {
   categoryToTab,
+  missingKinds,
   mixedAll,
   resultTabs,
   scopeFromParam,
@@ -96,6 +97,9 @@ function TrialStatusControl({
     </div>
   );
 }
+
+/** "a", "a and b", "a, b and c". */
+const listJoin = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
 
 const SCOPE_LABEL: Record<ScopeKey, string> = {
   all: "everything",
@@ -364,6 +368,7 @@ function SearchResults() {
   // bottom (there is no free patent API to search).
   const allView = () => {
     const groups = mixedAll(sections, 10);
+    const missing = missingKinds(sections);
     const q = encodeURIComponent(topic);
     return (
       <div className="space-y-10">
@@ -382,6 +387,20 @@ function SearchResults() {
             )}
           </section>
         ))}
+        {(missing.empty.length > 0 || missing.failed.length > 0) && (
+          <div className="rounded-xl bg-surface-container-low px-4 py-3 font-body-sm text-body-sm text-secondary" role="note">
+            {missing.empty.length > 0 && (
+              <p>
+                Nothing found for &ldquo;{topic}&rdquo; in {listJoin(missing.empty)}. Try a shorter query or a drug or gene name.
+              </p>
+            )}
+            {missing.failed.length > 0 && (
+              <p className={missing.empty.length > 0 ? "mt-1" : undefined}>
+                Couldn&apos;t search {listJoin(missing.failed)} right now. Try again in a moment.
+              </p>
+            )}
+          </div>
+        )}
         {topic.trim() && (
           <p className="font-body-sm text-body-sm text-secondary">
             Patents:{" "}
@@ -568,7 +587,7 @@ function SearchResults() {
                     <h2 className="mt-4 font-title text-[24px] font-medium text-on-background">
                       No results for &ldquo;{topic}&rdquo;
                     </h2>
-                    <p className="mt-2 text-secondary font-body-md">Try a broader term, or browse the full feed.</p>
+                    <p className="mt-2 text-secondary font-body-md">Try a shorter query or a drug or gene name, or browse the full feed.</p>
                   </>
                 )}
 

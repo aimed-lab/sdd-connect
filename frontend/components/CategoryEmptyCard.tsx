@@ -102,7 +102,7 @@ export default function CategoryEmptyCard({
             No {lower} found for &ldquo;{query}&rdquo;
           </h3>
           <p className="mt-2 text-secondary font-body-md">
-            Try a broader term or browse the full feed.
+            Try a shorter query or a drug or gene name, or show all results.
           </p>
           <div className="mt-6 flex justify-center">{browse}</div>
           {/* secondary: contribute */}
