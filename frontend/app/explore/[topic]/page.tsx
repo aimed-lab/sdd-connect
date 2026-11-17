@@ -35,6 +35,7 @@ import ResourceBento, { liveTile } from "@/components/explore/ResourceBento";
 import ResultsSidebar from "@/components/explore/ResultsSidebar";
 import { ApprovalTile, TILE_GRID, TrialTile } from "@/components/explore/ResultTiles";
 import SectionHeading from "@/components/explore/SectionHeading";
+import TrialLandscape from "@/components/explore/TrialLandscape";
 import { BlockSkeleton, PageSkeleton } from "@/components/explore/Skeletons";
 import {
   categoryToTab,
@@ -109,6 +110,43 @@ const SCOPE_LABEL: Record<ScopeKey, string> = {
   news: "news",
 };
 
+// List of trial tiles, or the competitive landscape grouped by drug (#82).
+function TrialViewControl({
+  value,
+  onChange,
+}: {
+  value: "list" | "landscape";
+  onChange: (v: "list" | "landscape") => void;
+}) {
+  const options: { value: "list" | "landscape"; label: string }[] = [
+    { value: "list", label: "List" },
+    { value: "landscape", label: "Landscape" },
+  ];
+  return (
+    <div className="inline-flex items-center gap-1 p-1 rounded-lg bg-surface-container-low border border-outline-variant/30 w-fit">
+      {options.map((opt) => {
+        const active = opt.value === value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(opt.value)}
+            className={
+              "px-3 py-1.5 rounded-md font-label-md text-label-md whitespace-nowrap transition-all " +
+              (active
+                ? "bg-secondary-container text-on-secondary-container font-semibold shadow-sm"
+                : "text-secondary hover:text-on-background")
+            }
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function SearchResults() {
   const router = useRouter();
   const params = useParams<{ topic: string }>();
@@ -148,6 +186,7 @@ function SearchResults() {
   const scope = scopeFromParam(categoryParam);
   const scoped = scope !== "all";
   const [selected, setSelected] = useState<string | null>(null);
+  const [trialView, setTrialView] = useState<"list" | "landscape">("list");
 
   // FIRST LOAD ONLY: when arriving with a projectId (from "Explore for this
   // project" — see lib/projectTypes.ts:buildProjectExploreHref), `topic` is
@@ -298,6 +337,9 @@ function SearchResults() {
   };
 
   const trialSection = () => {
+    if (trialView === "landscape") {
+      return <TrialLandscape query={sectionOf("trial")?.query || topic} statusFilter={statusFilter} />;
+    }
     const items = sortTrialsRecruitingFirst(itemsOf("trial"));
     if (items.length === 0) return null;
     return (
@@ -399,6 +441,7 @@ function SearchResults() {
   };
 
   const selectedView = (kind: string) => {
+    if (kind === "trial" && trialView === "landscape") return <div>{trialSection()}</div>;
     const section = sectionOf(kind);
     if (!section || section.items.length === 0) return emptyCategory(kind);
 
@@ -539,6 +582,10 @@ function SearchResults() {
                 <div>
                   <p className="mb-2 text-secondary font-label-md text-label-md">Trial status</p>
                   <TrialStatusControl value={trialStatusParam ?? ""} onChange={onTrialStatusChange} />
+                </div>
+                <div>
+                  <p className="mb-2 text-secondary font-label-md text-label-md">View</p>
+                  <TrialViewControl value={trialView} onChange={setTrialView} />
                 </div>
               </div>
             )}

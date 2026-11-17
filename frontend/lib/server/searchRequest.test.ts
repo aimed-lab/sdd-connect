@@ -8,7 +8,10 @@ import {
   RATE_LIMITED_MESSAGE,
   SEARCH_TEXT_MAX,
   SEARCH_WINDOW_MS,
+  LANDSCAPE_MAX_PER_WINDOW,
+  gateLandscapeRequest,
   parseExploreBody,
+  parseLandscapeBody,
   parsePapersQuery,
   retryAfterHeaders,
 } from "./searchRequest.ts";
@@ -93,4 +96,46 @@ test("clientIp: prefers the platform-set headers over x-forwarded-for", () => {
   assert.equal(clientIp(req({ "x-real-ip": "2.2.2.2", "x-forwarded-for": "9.9.9.9" })), "2.2.2.2");
   assert.equal(clientIp(req({ "x-forwarded-for": "9.9.9.9, 10.0.0.1" })), "9.9.9.9");
   assert.equal(clientIp(req({})), "unknown");
+});
+
+test("parseExploreBody: per-source filters pass through only when set, and are bounded", () => {
+  const r = parseExploreBody(
+    JSON.stringify({ input: "x", grant_open_only: true, grant_agencies: ["NIH", ""], grant_sort: "deadline", trial_location: " Alabama " })
+  );
+  assert.equal(r.ok, true);
+  if (r.ok) {
+    assert.deepEqual(r.sourceFilters, { grant_open_only: true, grant_agencies: ["NIH"], grant_sort: "deadline", trial_location: "Alabama" });
+  }
+  const none = parseExploreBody(JSON.stringify({ input: "x", grant_open_only: "yes", grant_sort: "relevance" }));
+  assert.equal(none.ok && none.sourceFilters, undefined);
+  assert.equal(parseExploreBody(JSON.stringify({ trial_location: "a".repeat(500) })).ok, false);
+});
+
+test("trial landscape: a 429 with Retry-After once one IP passes the limit", () => {
+  const limiter = createRateLimiter(SEARCH_WINDOW_MS, LANDSCAPE_MAX_PER_WINDOW);
+  const body = JSON.stringify({ query: "KRAS G12C" });
+  for (let i = 0; i < LANDSCAPE_MAX_PER_WINDOW; i++) {
+    assert.equal(gateLandscapeRequest(limiter, "1.2.3.4", body).ok, true);
+  }
+  const blocked = gateLandscapeRequest(limiter, "1.2.3.4", body);
+  assert.equal(blocked.ok, false);
+  if (!blocked.ok) {
+    assert.equal(blocked.status, 429);
+    assert.equal(blocked.headers?.["Retry-After"], String(SEARCH_WINDOW_MS / 1000));
+    assert.equal(blocked.body.message, RATE_LIMITED_MESSAGE);
+  }
+  assert.equal(gateLandscapeRequest(limiter, "5.6.7.8", body).ok, true);
+});
+
+test("trial landscape: input bounds", () => {
+  assert.deepEqual(parseLandscapeBody(JSON.stringify({ query: " KRAS ", status_filter: ["RECRUITING", "1; drop", ""], trial_location: " Alabama " })), {
+    ok: true, query: "KRAS", statusFilter: ["RECRUITING"], location: "Alabama",
+  });
+  assert.equal(parseLandscapeBody(JSON.stringify({ query: "a".repeat(SEARCH_TEXT_MAX + 1) })).ok, false);
+  assert.equal(parseLandscapeBody(JSON.stringify({ query: "x", trial_location: "a".repeat(101) })).ok, false);
+  assert.equal(parseLandscapeBody(" ".repeat(5000)).ok, false);
+  assert.deepEqual(parseLandscapeBody("{nope"), { ok: true, query: "" });
+  const limiter = { limited: () => false };
+  const tooLong = gateLandscapeRequest(limiter, "ip", JSON.stringify({ query: "a".repeat(SEARCH_TEXT_MAX + 1) }));
+  assert.equal(!tooLong.ok && tooLong.status, 400);
 });

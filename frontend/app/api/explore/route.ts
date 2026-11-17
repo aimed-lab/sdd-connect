@@ -82,6 +82,8 @@ export async function POST(req: Request) {
   }
   let input = parsed.input;
   const { personalize, projectId, sinceYear, statusFilter, onlyKinds } = parsed;
+  // Optional per-source filters; the backend validates them too.
+  const sourceFilters = parsed.sourceFilters ?? {};
 
   if (projectId) {
     const result = await getProject(projectId);
@@ -110,6 +112,7 @@ export async function POST(req: Request) {
     if (sinceYear !== undefined) payload.since_year = sinceYear;
     if (statusFilter !== undefined) payload.status_filter = statusFilter;
     if (onlyKinds !== undefined && input.trim()) payload.only_kinds = onlyKinds;
+    if (input.trim()) Object.assign(payload, sourceFilters);
     const res = await fetch(`${EXPLORE_API_URL}/api/explore`, {
       method: "POST",
       headers: exploreBackendHeaders({ "Content-Type": "application/json" }),
