@@ -8,14 +8,11 @@ import { postLoginPath } from "@/lib/safeRedirect";
 // redirectTo=<this route>?next=<where the user was headed>. Keycloak
 // authenticates, Supabase's own /auth/v1/callback exchanges the OIDC
 // response for a PKCE `code` and bounces the browser here with it. This
-// route finishes the exchange — exactly the same exchangeCodeForSession()
-// call the password-recovery flow uses in app/auth/confirm/route.ts, since
-// PKCE code exchange doesn't care which flow produced the code.
+// route finishes the PKCE exchange via confirmEmailLink() in lib/auth.ts.
 //
 // On success the session cookies are set by the seam and we redirect to
 // ?next= (sanitised — it round-trips through the IdP, so it is untrusted
-// input). On failure we send the user to /login with a flag, same pattern
-// as /auth/confirm.
+// input). On failure we send the user to /login with a flag.
 
 export const dynamic = "force-dynamic"; // depends on cookies + query
 
