@@ -55,7 +55,7 @@ export const dynamic = "force-dynamic"; // depends on the session
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const team = await getCommunityBySlug(slug);
-  return { title: team ? `${team.name} · Team · SmartDrugDiscovery` : "Team · SmartDrugDiscovery" };
+  return { title: team ? `${team.name} · Team` : "Team" };
 }
 
 export default async function TeamPage({

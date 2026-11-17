@@ -18,7 +18,7 @@ import CreateProjectForm from "@/components/projects/CreateProjectForm";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
-export const metadata = { title: "Create a project · SmartDrugDiscovery" };
+export const metadata = { title: "Create a project" };
 
 export default async function NewProjectPage({
   searchParams,

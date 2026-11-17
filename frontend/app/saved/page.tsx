@@ -16,7 +16,7 @@ import SavedItemsSection from "@/components/SavedItemsSection";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
-export const metadata = { title: "Saved items · SmartDrugDiscovery" };
+export const metadata = { title: "Saved items" };
 
 export default async function SavedItemsPage() {
   const user = await getCurrentUser();

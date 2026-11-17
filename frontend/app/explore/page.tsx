@@ -430,7 +430,12 @@ function ExploreFeed() {
 export default function ExplorePage() {
   return (
     <Suspense
-      fallback={<PageSkeleton />}
+      fallback={
+        <>
+          <h1 className="sr-only">Explore</h1>
+          <PageSkeleton />
+        </>
+      }
     >
       <ExploreFeed />
     </Suspense>

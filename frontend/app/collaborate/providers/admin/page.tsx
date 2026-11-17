@@ -16,7 +16,7 @@ import { getAllProviders, getProviderBySlug } from "@/lib/server/providers/provi
 import { loadAdminData } from "@/lib/server/providers/store";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Provider directory admin | SmartDrugDiscovery", robots: { index: false } };
+export const metadata: Metadata = { title: "Provider directory admin", robots: { index: false } };
 
 const TABS = [
   { key: "quotes", label: "Quote requests" },

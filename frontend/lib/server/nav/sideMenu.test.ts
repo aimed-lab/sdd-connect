@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { DISCOVER, MY_WORK, initialsOf, isActivePath, menuFooter, menuGroups, nextOpen, wrapFocus, type MenuEvent } from "./sideMenu.ts";
+import { DISCOVER, MY_WORK, PROGRAM_ITEM, initialsOf, isActivePath, menuFooter, menuGroups, nextOpen, wrapFocus, type MenuEvent } from "./sideMenu.ts";
 
 const read = (p: string) => readFileSync(new URL(`../../../${p}`, import.meta.url), "utf8");
 
@@ -78,10 +78,34 @@ test("My work and Discover: the items, in order", () => {
     ["Explore", "/explore", "Papers, trials and datasets"],
     ["Collaborate", "/collaborate", "Service providers and resources"],
     ["Promote", "/promote", "Share a paper or a result"],
+    ["Events", "/events", "Conferences and contests"],
     ["Communities", "/communities", "Researchers in your area"],
-    ["CollaboFest 2026", "/programs/colabofest-2026", "Timeline and finalists"],
+    ["CollaboFest 2026", "/communities/colabofest-2026", "SPARC's drug discovery challenge"],
   ]);
   assert.ok(MY_WORK.every((i) => i.tint) && DISCOVER.every((i) => !i.tint));
+});
+
+test("the CollaboFest dashboard link is only for its leads and managers", () => {
+  const hrefs = (groups: ReturnType<typeof menuGroups>) => groups.flatMap((g) => g.items.map((i) => i.href));
+  const dashboard = "/programs/colabofest-2026";
+  for (const groups of [menuGroups(false), menuGroups(false, true), menuGroups(true), menuGroups(true, false)]) {
+    assert.ok(!hrefs(groups).includes(dashboard));
+    assert.ok(hrefs(groups).includes("/communities/colabofest-2026"));
+  }
+  const staff = menuGroups(true, true);
+  assert.deepEqual(staff[0].items.at(-1), PROGRAM_ITEM);
+  assert.equal(PROGRAM_ITEM.href, dashboard);
+  assert.ok(PROGRAM_ITEM.tint);
+  // The access flag comes from the server, per signed-in user, never cached.
+  const nav = read("components/Nav.tsx");
+  assert.match(nav, /\/api\/programs\/colabofest-2026\/access/);
+  assert.match(nav, /programAccess=\{programAccess\}/);
+  assert.match(read("components/SideMenu.tsx"), /menuGroups\(signedIn, programAccess\)/);
+  const route = read("app/api/programs/colabofest-2026/access/route.ts");
+  assert.match(route, /hasProgramAccess\(\)/);
+  assert.match(route, /no-store/);
+  // The dashboard page itself still 404s for everyone else.
+  assert.match(read("app/programs/colabofest-2026/page.tsx"), /no_access"\) notFound\(\)/);
 });
 
 test("isActivePath: the item's page and pages under it, nothing that only starts the same", () => {

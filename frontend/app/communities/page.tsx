@@ -19,7 +19,7 @@ import DeletedNotice, { wasDeleted } from "@/components/DeletedNotice";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
-export const metadata = { title: "Communities · SmartDrugDiscovery" };
+export const metadata = { title: "Communities" };
 
 export default async function CommunitiesPage({
   searchParams,

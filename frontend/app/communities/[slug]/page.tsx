@@ -109,7 +109,7 @@ export const dynamic = "force-dynamic"; // depends on the session
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const community = await getCommunityBySlug(slug);
-  return { title: community ? `${community.name} · SmartDrugDiscovery` : "Community · SmartDrugDiscovery" };
+  return { title: community ? `${community.name}` : "Community" };
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
