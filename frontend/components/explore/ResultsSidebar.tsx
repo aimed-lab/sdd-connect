@@ -12,7 +12,14 @@ import { joinCommunityAction } from "@/app/communities/actions";
 import { useAuth } from "@/context/AuthContext";
 import { followUpsFor } from "@/lib/server/assistant/assistantAnswer";
 import { openAssistant, saveAsLivingPageMessage } from "@/lib/server/assistant/assistantBridge";
-import { matchAction, pickPeopleMatch, type CommunityMatch } from "@/lib/server/assistant/communityMatch";
+import {
+  JOIN_REVIEW_NOTE,
+  matchAction,
+  matchReason,
+  pickPeopleMatch,
+  SIGNED_OUT_MATCH_NOTE,
+  type CommunityMatch,
+} from "@/lib/server/assistant/communityMatch";
 import { nextStepsFor } from "@/lib/server/explore/nextSteps";
 import type { ExploreSection } from "@/types/explore";
 
@@ -65,18 +72,15 @@ function PeopleOnThis({ topic }: { topic: string }) {
     return (
       <Card title="People on this">
         <p className="font-body-sm text-body-sm text-secondary break-words">
-          No community matches &ldquo;{topic}&rdquo; yet. Try a shorter topic, or{" "}
+          No {user ? "" : "listed "}community matches &ldquo;{topic}&rdquo; yet. Try a shorter topic, or{" "}
           <Link href="/communities" className="text-primary hover:underline underline-offset-4">
             browse all communities
           </Link>
           .
         </p>
         {!user && (
-          <Link
-            href={`/login?callbackUrl=${encodeURIComponent(`/explore/${encodeURIComponent(topic)}`)}`}
-            className="font-label-md text-label-md text-primary hover:underline underline-offset-4"
-          >
-            Sign in to join or start one
+          <Link href={loginHref(topic)} className="font-label-md text-label-md text-primary hover:underline underline-offset-4">
+            {SIGNED_OUT_MATCH_NOTE}
           </Link>
         )}
       </Card>
@@ -94,7 +98,10 @@ function PeopleOnThis({ topic }: { topic: string }) {
           {match.memberCount} {match.memberCount === 1 ? "member" : "members"}
           {match.runBy ? ` · Run by ${match.runBy}` : ""}
         </p>
-        {match.why.length > 0 && <p className="font-body-sm text-body-sm text-primary">Matches: {match.why.join(", ")}</p>}
+        {match.why.length > 0 && <p className="font-body-sm text-body-sm text-primary">{match.reason || matchReason(match.why)}</p>}
+        {!match.isOpen && !(user && match.state === "active") && (
+          <p className="font-body-sm text-body-sm text-secondary">{JOIN_REVIEW_NOTE}</p>
+        )}
       </div>
       {done ? (
         <p className="font-label-md text-label-md text-primary">{done === "active" ? "You're in" : "Request sent"}</p>
@@ -122,12 +129,14 @@ function PeopleOnThis({ topic }: { topic: string }) {
           </Link>
         </p>
       ) : act.kind === "signin" ? (
-        <Link
-          href={`/login?callbackUrl=${encodeURIComponent(`/explore/${encodeURIComponent(topic)}`)}`}
-          className="btn-primary self-start px-4 py-2 rounded-lg font-label-md text-label-md"
-        >
-          {act.label}
-        </Link>
+        <>
+          <Link href={loginHref(topic)} className="btn-primary self-start px-4 py-2 rounded-lg font-label-md text-label-md">
+            {act.label}
+          </Link>
+          <Link href={loginHref(topic)} className="font-body-sm text-body-sm text-primary hover:underline underline-offset-4">
+            {SIGNED_OUT_MATCH_NOTE}
+          </Link>
+        </>
       ) : (
         <p className="font-label-md text-label-md text-secondary">{act.label}</p>
       )}

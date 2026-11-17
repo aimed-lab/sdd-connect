@@ -55,7 +55,7 @@ import {
   type SectionConfig,
 } from "@/lib/communityTypes";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "./exploreBackend";
-import { MATCH_LIMIT, MATCH_MIN_COVERAGE, rankCommunities, type RankedCommunity } from "./assistant/communityMatch";
+import { MATCH_LIMIT, matchCommunityList, rankCommunities, type RankedCommunity } from "./assistant/communityMatch";
 import { visibleCommunities } from "./communityVisibility";
 import type { ExploreItem } from "@/types/explore";
 import { canAddResource, type CommunityKind } from "./teams/teamRules";
@@ -191,8 +191,10 @@ export async function searchCommunities(query: string, opts: { signedIn: boolean
 /** The best few communities for a topic, each with why it matched. Stricter
  *  than searchCommunities: a community must share most of the query's
  *  distinctive words (MATCH_MIN_COVERAGE), so one word like "cancer" is not a
- *  match for "pancreatic cancer KRAS". Used by the assistant's "check before
- *  creating" step. */
+ *  match for "pancreatic cancer KRAS"; synonyms count ("brain tumor" finds
+ *  Neuro-oncology) and a 2-3 word query needs only one specific shared word
+ *  (matchCommunityList). Used by the assistant's "check before creating" step
+ *  and Explore's "People on this". */
 export async function searchCommunityMatches(
   query: string,
   opts: { signedIn: boolean; limit?: number }
@@ -200,7 +202,7 @@ export async function searchCommunityMatches(
   const limit = opts.limit ?? MATCH_LIMIT;
   // Filtered before ranking, so a signed-out viewer still gets up to `limit` listed communities.
   const all = visibleCommunities(await listCommunities(), opts.signedIn);
-  return rankCommunities(query, all, { minCoverage: MATCH_MIN_COVERAGE, limit });
+  return matchCommunityList(query, all, limit);
 }
 
 /** One community plus the signed-in caller's relationship to it — the shape

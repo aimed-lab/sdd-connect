@@ -13,6 +13,10 @@
 //     unrelated single-word hits.
 // The assistant also asks for a minimum coverage, so a community that only
 // shares "cancer" with "pancreatic cancer KRAS" is not offered as a match.
+//
+// Match cards (matchCommunityList) also use TOPIC_SYNONYMS, so "brain tumor"
+// finds a community called Neuro-oncology, and accept a 2-3 word query that
+// shares one specific word (not only "cancer" or "tumor").
 
 import { GENERIC_SCIENCE_STOPWORDS } from "../genericScienceStopwords.ts";
 
@@ -34,9 +38,44 @@ export type RankedCommunity<T> = {
   score: number;
   /** Share of the query's words found, 0..1. */
   coverage: number;
-  /** Why it matched: phrases first, then single words, in the query's own spelling. */
+  /** Why it matched: phrases first, then single words, in the query's own spelling;
+   *  a word found only through a synonym reads "brain (neuro-oncology)". */
   matched: string[];
+  /** A word found was specific, not only a broad one like "cancer". */
+  specific: boolean;
 };
+
+/** Query word -> words existing communities use for the same topic. Only
+ *  targets that appear in a community's name, topics or purpose belong here. */
+export const TOPIC_SYNONYMS: Record<string, string[]> = {
+  brain: ["neuro-oncology", "glioblastoma"],
+  glioma: ["neuro-oncology", "glioblastoma"],
+  gliomas: ["neuro-oncology", "glioblastoma"],
+  gbm: ["neuro-oncology", "glioblastoma"],
+  glioblastoma: ["neuro-oncology"],
+  neurooncology: ["neuro-oncology"],
+  cancer: ["oncology", "tumor"],
+  cancers: ["cancer", "oncology", "tumor"],
+  tumor: ["oncology", "cancer"],
+  tumors: ["tumor", "oncology", "cancer"],
+  tumour: ["tumor", "oncology", "cancer"],
+  tumours: ["tumor", "oncology", "cancer"],
+  oncology: ["cancer", "tumor"],
+  carcinoma: ["cancer"],
+  pancreas: ["pancreatic"],
+  alzheimer: ["dementia"],
+  alzheimers: ["dementia"],
+  tobacco: ["smoking"],
+  immune: ["immunotherapy"],
+  drugs: ["drug discovery"],
+  pharmacology: ["drug discovery"],
+};
+
+/** Words too broad to justify a match on their own in a short query. */
+const BROAD_WORDS = new Set([
+  "cancer", "cancers", "tumor", "tumors", "tumour", "tumours", "oncology", "disease", "diseases",
+  "drug", "drugs", "therapy", "medicine", "health", "clinical", "patients", "treatment", "biology",
+]);
 
 type Token = { lower: string; shown: string };
 
@@ -60,10 +99,12 @@ const WEIGHT = { name: 3, topic: 2, description: 1 } as const;
 export function rankCommunities<T extends RankableCommunity>(
   query: string,
   communities: T[],
-  opts: { minCoverage?: number; limit?: number } = {}
+  opts: { minCoverage?: number; limit?: number; synonyms?: boolean } = {}
 ): RankedCommunity<T>[] {
   const tokens = queryTokens(query);
   if (tokens.length === 0) return [];
+  const alts = (t: Token) =>
+    opts.synonyms ? (TOPIC_SYNONYMS[t.lower] ?? []).map((shown) => ({ text: norm(shown), shown })) : [];
 
   const ranked = communities.map((community) => {
     const fields = [
@@ -74,9 +115,19 @@ export function rankCommunities<T extends RankableCommunity>(
 
     let score = 0;
     const found = new Set<string>();
+    const viaSynonym = new Map<string, string>();
     for (const t of tokens) {
       let best = 0;
       for (const f of fields) if (f.text.includes(t.lower)) best += f.w;
+      if (best === 0) {
+        // A synonym counts for half: the user's own word beats a related one.
+        for (const a of alts(t)) {
+          let hit = 0;
+          for (const f of fields) if (f.text.includes(a.text)) hit += f.w / 2;
+          if (hit > 0 && !viaSynonym.has(t.lower)) viaSynonym.set(t.lower, a.shown);
+          best = Math.max(best, hit);
+        }
+      }
       if (best > 0) found.add(t.lower);
       score += best;
     }
@@ -99,13 +150,16 @@ export function rankCommunities<T extends RankableCommunity>(
     }
 
     const inPhrase = new Set(phrases.flatMap((p) => p.toLowerCase().split(" ")));
-    const singles = tokens.filter((t) => found.has(t.lower) && !inPhrase.has(t.lower)).map((t) => t.shown);
+    const singles = tokens
+      .filter((t) => found.has(t.lower) && !inPhrase.has(t.lower))
+      .map((t) => (viaSynonym.has(t.lower) ? `${t.shown} (${viaSynonym.get(t.lower)})` : t.shown));
 
     return {
       community,
       score,
       coverage: found.size / tokens.length,
       matched: [...phrases, ...singles],
+      specific: [...found].some((w) => !BROAD_WORDS.has(w)),
     };
   });
 
@@ -128,6 +182,8 @@ export type CommunityMatch = {
   runBy: string | null;
   /** "Matches: …" terms. */
   why: string[];
+  /** matchReason(why): "Matched on: …". */
+  reason: string;
   /** The viewer's relationship: drives Join / Request to join / nothing. */
   state: "signed_out" | "none" | "pending" | "active";
 };
@@ -152,4 +208,29 @@ export function pickPeopleMatch<T extends Pick<CommunityMatch, "state">>(matches
 }
 
 export const MATCH_MIN_COVERAGE = 0.6;
+/** For a 2-3 word query: one specific shared word is enough ("brain tumor
+ *  research" vs a glioblastoma community), one broad word is not. */
+export const MATCH_SHORT_QUERY_COVERAGE = 0.3;
 export const MATCH_LIMIT = 3;
+
+/** Match cards: synonyms on, MATCH_MIN_COVERAGE (relaxed for 2-3 word queries
+ *  when a specific word is shared), at most `limit` results. */
+export function matchCommunityList<T extends RankableCommunity>(
+  query: string,
+  communities: T[],
+  limit = MATCH_LIMIT
+): RankedCommunity<T>[] {
+  const n = queryTokens(query).length;
+  const short = n >= 2 && n <= 3;
+  return rankCommunities(query, communities, { synonyms: true })
+    .filter((r) => r.coverage >= MATCH_MIN_COVERAGE || (short && r.specific && r.coverage >= MATCH_SHORT_QUERY_COVERAGE))
+    .slice(0, limit);
+}
+
+/** "Matched on: brain (neuro-oncology), glioblastoma", at most three terms. */
+export function matchReason(why: string[]): string {
+  return why.length ? `Matched on: ${why.slice(0, 3).join(", ")}` : "";
+}
+
+export const JOIN_REVIEW_NOTE = "Join requests are reviewed by the community admins.";
+export const SIGNED_OUT_MATCH_NOTE = "Sign in to see all matching communities.";
