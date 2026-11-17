@@ -4,6 +4,7 @@
 // is a server component; the search box, category chips and card grid are one
 // client component (ProviderDirectory) because filtering is instant and client
 // side. "List your services" saves a provider_requests row for the SPARC team.
+// The same list is available read-only as JSON at /api/providers.
 
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -39,8 +40,13 @@ export default async function ProvidersPage() {
         title="Find a service provider"
         subtitle="Companies we met at BioTechX Europe 2026 that can do the work: chemistry, biology, AI, manufacturing and reagents."
         action={<ListServicesButton signedIn={user !== null} />}
-        className="mb-8"
+        className="mb-4"
       />
+
+      <p className="mb-8 max-w-3xl font-body-md text-body-md text-secondary">
+        {`This is not a complete directory: it lists only the ${providers.length} companies we met at BioTechX Europe 2026, and no academic core facilities yet.`}{" "}
+        The capability tags come from each company&apos;s own list of services.
+      </p>
 
       <ProviderDirectory providers={providers} />
 
