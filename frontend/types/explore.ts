@@ -18,7 +18,22 @@ export type ExploreItem = {
   signal: Signal | null;
   dedupe_key?: string;
   raw?: Record<string, unknown>;
+  /** Papers only: a verbatim excerpt of the abstract (PubMed efetch or
+   *  OpenAlex). Absent when no abstract was found; the card then shows no
+   *  snippet. */
+  abstract?: string | null;
 };
+
+/** Why a section has no items (backend/explore-mcp/tools/explore.py). Only
+ *  "timed_out" is rendered specially today: the source didn't answer in time,
+ *  which is not the same as finding nothing. */
+export type EmptyReason =
+  | "no_results"
+  | "off_topic_filtered"
+  | "no_query"
+  | "source_error"
+  | "timed_out"
+  | "tool_query";
 
 export type ExploreSection = {
   tool: string;
@@ -32,7 +47,18 @@ export type ExploreSection = {
    *  handling, and CategoryStrip — there is no separate "key papers" kind
    *  or tab). Absent for every other section kind. */
   items_key?: ExploreItem[];
+  /** Papers section, typed searches only: the same papers ordered by how many
+   *  of the searched words their title and abstract contain ("Most relevant").
+   *  Newest first (`items`) stays the default. */
+  items_relevant?: ExploreItem[];
   error?: string;
+  /** The source didn't respond before its time limit; retrying usually works
+   *  (its fetch keeps running and fills the backend cache). */
+  timed_out?: boolean;
+  empty_reason?: EmptyReason;
+  /** A short source caveat with a link, e.g. the FDA data-lag note on the
+   *  approvals section. */
+  note?: { text: string; url?: string };
 };
 
 /** The structured scope the backend either extracted from a search or used for
@@ -65,6 +91,20 @@ export type ApprovalRaw = {
   application_number?: string | null;
   approval_date?: string | null;
   review_priority?: string | null;
+  /** The label's "indications and usage" text (cut at 300 chars). */
+  indication?: string | null;
+  /** The first sentence of that text, verbatim. */
+  indication_first_sentence?: string | null;
+};
+
+/** kind "tool" (backend/explore-mcp/sources/github.py, GitHub repository
+ *  search): the only `raw` fields that pass the egress allow-list. pushed_at is
+ *  the last push to the repo ("last code update"), not a release date. */
+export type ToolRaw = {
+  license_spdx?: string | null;
+  language?: string | null;
+  topics?: string[];
+  pushed_at?: string | null;
 };
 
 /** backend/explore-mcp/sources/europepmc.py's `raw` shape (kind "preprint"). */

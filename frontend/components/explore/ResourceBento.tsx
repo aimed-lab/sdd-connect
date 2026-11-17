@@ -9,7 +9,7 @@
 import SaveButton from "@/components/explore/SaveButton";
 import { curatedToExploreItem, type CuratedItem } from "@/lib/curated";
 import { TYPE_STYLES, typeKeyForKind } from "@/lib/typeStyles";
-import type { ExploreItem } from "@/types/explore";
+import type { ExploreItem, ToolRaw } from "@/types/explore";
 
 export type BentoTile = {
   id: string;
@@ -101,6 +101,25 @@ export function liveTile(item: ExploreItem): BentoTile {
       meta: geo.accession || null,
       item,
       liveDataset: true,
+    };
+  }
+  if (item.kind === "tool") {
+    const repo = (item.raw ?? {}) as ToolRaw;
+    const tags = [repo.language, repo.license_spdx].filter((t): t is string => !!t);
+    const pushed = repo.pushed_at ? new Date(repo.pushed_at) : null;
+    const updated =
+      pushed && !isNaN(pushed.getTime())
+        ? `Last code update ${pushed.toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" })}`
+        : null;
+    return {
+      id: item.id,
+      kind: item.kind,
+      name: item.title,
+      description: item.summary?.trim() || null,
+      url: item.url,
+      tags,
+      meta: updated,
+      item,
     };
   }
   return {

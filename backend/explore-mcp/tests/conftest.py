@@ -26,3 +26,15 @@ def _reset_cache():
     asyncio.run(cache.clear())
     yield
     asyncio.run(cache.clear())
+
+
+@pytest.fixture(autouse=True)
+def _no_live_abstract_fetch(monkeypatch):
+    """Explore's paper sections fetch abstract excerpts from PubMed; tests never
+    reach the network for them unless a test stubs a response itself."""
+    import tools.abstracts as abstracts
+
+    async def none(pmids):
+        return {}
+
+    monkeypatch.setattr(abstracts, "_pubmed_abstracts_uncached", none)

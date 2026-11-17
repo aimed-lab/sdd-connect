@@ -24,6 +24,7 @@ if the routing JSON can't be parsed.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import datetime
 import json
 import logging
@@ -44,9 +45,10 @@ from cache import (
     normalize_key,
 )
 from tools import query_intent
+from tools.abstracts import attach_abstract_excerpts
 from tools.search_chembl import search_chembl_async
 from tools.search_datasets import search_datasets_async
-from tools.search_fda import search_fda_async
+from tools.search_fda import boost_distinctive, search_fda_async
 from tools.search_grants import search_grants_async
 from tools.search_lab_resources import search_lab_resources
 from tools.search_news import search_news_async
@@ -866,10 +868,63 @@ def _dispatch(name: str, query: str):
 
 
 # Overall cap per tool when fanning out. A tool that exceeds it yields an empty
-# section so the page still loads, but its fetch keeps running (shielded) and
-# lands in the per-tool cache for the next search.
+# section flagged `timed_out` (the UI shows "didn't respond in time — retry"),
+# but its fetch keeps running (shielded) and lands in the per-tool cache, so a
+# retry a few seconds later is served from it.
+#
+# _TOOL_TIMEOUT is the ceiling; _SOURCE_TIMEOUTS tightens it per source, and
+# the whole explore call also has a deadline (_explore_deadline_seconds,
+# measured from the start of the request, LLM steps included) that every
+# source's cap is clipped to. The deadline sits well below the Next.js proxy's
+# maxDuration (frontend/app/api/explore/route.ts), so the page always gets an
+# answer with the slow sources marked instead of the whole request dying.
 _TOOL_TIMEOUT = 20.0
+_SOURCE_TIMEOUTS: dict[str, float] = {
+    "search_papers": 18.0,       # 3 sources x entity fan-out + abstract excerpts
+    "search_preprints": 12.0,
+    "search_trials": 12.0,
+    "search_fda": 10.0,
+    "search_grants": 12.0,
+    "search_tools": 10.0,
+    "search_datasets": 12.0,
+    "search_pager": 12.0,
+    "search_chembl": 15.0,
+    "search_opentargets": 15.0,
+    "search_news": 8.0,
+    "search_lab_resources": 8.0,
+    "search_people": 8.0,
+    "search_wiki": 8.0,
+}
+_DEFAULT_DEADLINE = 25.0
+_MIN_REMAINING = 0.25   # a source whose turn comes after the deadline still gets a cache hit
 _TIMED_OUT = object()
+# A page with a timed-out section is recomputed after this many seconds, so the
+# UI's "retry" gets the source's late answer from the per-tool cache instead
+# of the same cached gap.
+_TIMED_OUT_RECHECK = 5.0
+_deadline_at: contextvars.ContextVar[float | None] = contextvars.ContextVar("explore_deadline_at", default=None)
+
+
+def _explore_deadline_seconds() -> float:
+    raw = (os.environ.get("EXPLORE_DEADLINE_SEC") or "").strip()
+    try:
+        value = float(raw) if raw else _DEFAULT_DEADLINE
+    except ValueError:
+        value = _DEFAULT_DEADLINE
+    return value if value > 0 else _DEFAULT_DEADLINE
+
+
+def _start_deadline() -> None:
+    """Start the whole-request deadline (once per uncached explore call)."""
+    _deadline_at.set(asyncio.get_running_loop().time() + _explore_deadline_seconds())
+
+
+def _cap_for(tool: str) -> float:
+    cap = min(_SOURCE_TIMEOUTS.get(tool, _TOOL_TIMEOUT), _TOOL_TIMEOUT)
+    deadline = _deadline_at.get()
+    if deadline is not None:
+        cap = min(cap, max(deadline - asyncio.get_running_loop().time(), _MIN_REMAINING))
+    return cap
 
 
 def _consume_exception(task: "asyncio.Future") -> None:
@@ -880,18 +935,143 @@ def _consume_exception(task: "asyncio.Future") -> None:
 
 
 async def _capped(tool: str, query: str, awaitable):
+    cap = _cap_for(tool)
     task = asyncio.ensure_future(awaitable)
     task.add_done_callback(_consume_exception)
     try:
-        return await asyncio.wait_for(asyncio.shield(task), _TOOL_TIMEOUT)
+        return await asyncio.wait_for(asyncio.shield(task), cap)
     except asyncio.TimeoutError:
         if task.done():   # the tool itself raised a timeout; not the cap
             raise
         logger.warning(
-            "explore: tool %s exceeded %.0fs for query=%r; returning an empty section "
-            "(the fetch keeps running and will fill the cache)", tool, _TOOL_TIMEOUT, query,
+            "explore: tool %s exceeded %.1fs for query=%r; marking it timed out "
+            "(the fetch keeps running and will fill the cache)", tool, cap, query,
         )
         return _TIMED_OUT
+
+
+# ── Papers: abstract excerpts and the "Most relevant" order ───────────────────
+
+
+async def _papers_with_abstracts(queries: list[str], since_year: int | None) -> tuple[list[dict], list[dict]]:
+    """(latest, key) as dicts, each paper with a verbatim `abstract` excerpt
+    when one is available (see tools/abstracts.attach_abstract_excerpts)."""
+    latest, key = await search_papers_multi_dual_async(
+        queries, limit_per_query=_NET_LIMIT, final_limit=_NET_LIMIT, since_year=since_year,
+    )
+    latest_d = [i.model_dump() for i in latest]
+    key_d = [i.model_dump() for i in key]
+    await attach_abstract_excerpts(latest_d, key_d)
+    return latest_d, key_d
+
+
+# Words that say nothing about WHICH papers fit ("latest papers on KRAS").
+_RELEVANCE_STOPWORDS = {
+    "a", "an", "and", "the", "of", "in", "on", "for", "to", "with", "by", "from", "at", "as",
+    "or", "is", "are", "what", "which", "how", "about", "into", "via", "vs", "versus",
+    "paper", "papers", "study", "studies", "research", "article", "articles", "review",
+    "reviews", "latest", "newest", "recent", "new", "find", "show", "me", "any", "all",
+}
+_WORD = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+
+
+def _relevance_terms(text: str) -> list[str]:
+    out: list[str] = []
+    for w in _WORD.findall((text or "").lower()):
+        if (len(w) > 1 or w.isdigit()) and w not in _RELEVANCE_STOPWORDS and w not in out:
+            out.append(w)
+    return out
+
+
+def _relevance_order(items: list[dict], key_order: list[dict], text: str) -> list[dict]:
+    """The same papers ordered by how many of the typed search's words appear in
+    the title (counted twice) and abstract. Ties keep the Key-papers (WINNER)
+    order, then the given order. Nothing is dropped: there is no floor."""
+    terms = _relevance_terms(text)
+    rank = {i.get("id"): n for n, i in enumerate(key_order)}
+
+    def score(item: dict) -> int:
+        title = set(_WORD.findall((item.get("title") or "").lower()))
+        raw = item.get("raw") if isinstance(item.get("raw"), dict) else {}
+        body = " ".join(str(x) for x in (raw.get("abstract"), item.get("abstract")) if x)
+        body_words = set(_WORD.findall(body.lower()))
+        return sum(2 if t in title else 1 if t in body_words else 0 for t in terms)
+
+    indexed = list(enumerate(items))
+    indexed.sort(key=lambda p: (-score(p[1]), rank.get(p[1].get("id"), len(rank)), p[0]))
+    return [i for _, i in indexed]
+
+
+# ── FDA approvals: which lookup, if any ───────────────────────────────────────
+
+_FDA_NOTE = {
+    "text": "FDA data can lag recent approvals by days to weeks. Check Drugs@FDA for the latest.",
+    "url": "https://www.accessdata.fda.gov/scripts/cder/daf/",
+}
+
+
+def _distinctive_tokens(text: str) -> list[str]:
+    """Variant-like tokens the user typed ("G12C", "V600E"). They boost an
+    approval whose indication names them; they never filter one out."""
+    out: list[str] = []
+    for w in (text or "").split():
+        token = w.strip(",;:.?!()").upper()
+        if query_intent._VARIANT.match(token) and token not in out:
+            out.append(token)
+    return out
+
+
+def _fda_plan(scope: dict) -> tuple[str, str] | None:
+    """(mode, query) for the approvals lookup — one openFDA label search:
+      * a drug in scope   -> ("drug", name): label generic/brand name;
+      * a disease         -> ("indication", disease);
+      * a gene with a typed variant ("KRAS G12C") -> ("indication", that phrase),
+        since labels name the variant in the indication;
+      * a pure gene/target query (no disease, drug or variant) -> None: label
+        indications name diseases, not targets, so the search would only
+        return drugs that mention the gene in passing."""
+    assets = [a.strip() for a in (scope.get("assets") or []) if a and a.strip()]
+    if assets:
+        return "drug", assets[0]
+    query = _query_for("search_fda", scope)
+    if query:
+        return "indication", query
+    variants = query_intent.parse(scope.get("_raw_input") or "").variants
+    for gene in scope.get("genes") or []:
+        if gene in variants:
+            return "indication", variants[gene]
+    return None
+
+
+async def _fda_task(query: str, mode: str, boost: list[str]):
+    items = await search_fda_async(query, _NET_LIMIT, by=mode)
+    return boost_distinctive(items, boost)
+
+
+# ── Tool searches: GEO datasets only when the question is about data ──────────
+
+_TOOL_WORDS = re.compile(
+    r"\b(?:tools?|software|packages?|librar(?:y|ies)|pipelines?|frameworks?|web\s*servers?|"
+    r"servers?|open[-\s]?source|github|repos?|repositories|programs?|algorithms?)\b",
+    re.I,
+)
+_DATA_WORDS = re.compile(
+    r"\b(?:data|datasets?|data\s*sets?|expression|transcriptom\w*|rna[-\s]?seq|scrna[-\s]?seq|"
+    r"single[-\s]cell|microarrays?|geo|gse\d*|omics|genomics|proteom\w*|sequencing|atlas|cohorts?|samples?)\b",
+    re.I,
+)
+
+
+def _is_tool_query_without_data(text: str, scope: dict) -> bool:
+    """A question about software ("open-source tools for molecular docking",
+    or a method with no gene or disease) that says nothing about data: GEO
+    expression series are noise for it."""
+    text = text or ""
+    if _DATA_WORDS.search(text):
+        return False
+    if _TOOL_WORDS.search(text):
+        return True
+    return bool(scope.get("methods")) and not scope.get("genes") and not scope.get("diseases")
 
 
 async def _execute(
@@ -921,16 +1101,19 @@ async def _execute(
                 papers_scope = {**scope, "topics": list(scope.get("topics") or []) + extra}
             queries = [overrides[name]] if overrides.get(name) else _entity_queries_for_papers(papers_scope)
             papers_query_display = " | ".join(queries)
-            tasks.append(
-                search_papers_multi_dual_async(
-                    queries, limit_per_query=_NET_LIMIT, final_limit=_NET_LIMIT,
-                    since_year=since_year,
-                )
-            )
+            tasks.append(_papers_with_abstracts(queries, since_year))
             specs.append((name, _KINDS[name], papers_query_display))
             continue
+        if name == "search_fda":
+            plan = ("indication", overrides[name]) if overrides.get(name) else _fda_plan(scope)
+            if not plan:
+                continue   # pure gene/target query: no label indication to search
+            mode, query = plan
+            tasks.append(_fda_task(query, mode, _distinctive_tokens(scope.get("_raw_input") or "")))
+            specs.append((name, _KINDS[name], query))
+            continue
         query = overrides.get(name) or _query_for(name, scope)
-        if name in ("search_preprints", "search_fda") and not query:
+        if name == "search_preprints" and not query:
             continue   # nothing to search on
         if name == "search_opentargets":
             # Thread the disease term through as a SEPARATE parameter
@@ -1017,11 +1200,13 @@ async def _execute(
                 "explore: tool %s failed for query=%r", tool, query, exc_info=result
             )
         elif result is _TIMED_OUT:
-            # Over the per-tool cap: empty section, page still loads.
+            # Over the per-tool cap: the page still loads, and the section says
+            # it ran out of time (not that it found nothing).
             section["items"] = []
             if tool == "search_papers":
                 section["items_key"] = []
             section["timed_out"] = True
+            section["empty_reason"] = "timed_out"
         elif tool == "search_papers":
             # search_papers_multi_dual_async returns (latest, key) — TWO
             # orderings of the SAME already-ranked pool (see that function's
@@ -1032,10 +1217,15 @@ async def _execute(
             # subsection under the same Papers tab (see CategoryStrip —
             # this is not a new top-level kind/tab).
             latest, key = result
-            section["items"] = [item.model_dump() for item in latest]
-            section["items_key"] = [item.model_dump() for item in key]
+            section["items"] = latest
+            section["items_key"] = key
+            # Typed searches also get a "Most relevant" order of the same papers.
+            if scope.get("_raw_input") and not scope.get("is_default"):
+                section["items_relevant"] = _relevance_order(latest, key, scope["_raw_input"])
         else:
             section["items"] = [item.model_dump() for item in result]
+        if kind == "approval":
+            section["note"] = dict(_FDA_NOTE)
         sections.append(section)
 
     # A preprint with the same DOI as a returned paper is the same work: show
@@ -1054,6 +1244,26 @@ async def _execute(
 
 
 _TOOL_FOR_KIND: dict[str, str] = {kind: tool for tool, kind in _KINDS.items()}
+
+# Sources the popular-topic prewarm fills (prewarm.py). External, cached
+# sources only; GitHub is left out for its 30-a-minute search budget.
+_PREWARM_TOOLS = {
+    "search_papers", "search_preprints", "search_trials", "search_fda", "search_grants",
+    "search_datasets", "search_pager", "search_chembl", "search_opentargets",
+}
+
+
+async def prewarm_topic(text: str) -> list[str]:
+    """Fill the per-source caches for `text` with NO LLM call: the scope comes
+    from the deterministic parser and the sources from the heuristic router.
+    Returns the tools run."""
+    intent = query_intent.parse(text)
+    scope = query_intent.refine_scope({}, intent)
+    tools = [t for t in _heuristic_tools(scope) if t in _PREWARM_TOOLS]
+    if tools:
+        _start_deadline()
+        await _execute(tools, {**scope, "_raw_input": intent.core or intent.text})
+    return tools
 
 
 _GRANT_SORTS = {"deadline"}
@@ -1205,22 +1415,33 @@ async def _execute_only(
     entity = query_intent.shortest_entity(scope, intent)
     overrides: dict[str, str] = {}
     for name in tools:
-        # A chosen source with nothing in its usual slice (approvals with no
-        # disease named, say) searches the entity instead of being skipped.
-        if name in ("search_preprints", "search_fda") and not _query_for(name, scope) and entity:
+        # A chosen source with nothing in its usual slice (preprints with no
+        # disease or gene named, say) searches the entity instead of being
+        # skipped. Approvals are not overridden: _fda_plan decides, and a pure
+        # gene/target question runs no label search at all.
+        if name == "search_preprints" and not _query_for(name, scope) and entity:
             overrides[name] = entity
 
     exec_scope = {**scope, "_raw_input": intent.core or intent.text}
+    skipped_datasets = "search_datasets" in tools and _is_tool_query_without_data(intent.text, scope)
+    run_tools = [t for t in tools if not (skipped_datasets and t == "search_datasets")]
     fextra = {"source_filters": source_filters} if source_filters else {}
-    sections = await _execute(tools, exec_scope, since_year, status_filter, query_overrides=overrides, **fextra)
+    sections = await _execute(run_tools, exec_scope, since_year, status_filter, query_overrides=overrides, **fextra)
     by_tool = {s["tool"]: s for s in sections}
+    if skipped_datasets:
+        by_tool["search_datasets"] = {
+            "tool": "search_datasets", "kind": "dataset", "query": "", "items": [],
+            "empty_reason": "tool_query",
+        }
     groups = query_intent.gate_terms(scope, intent)
     for s in sections:
         _gate_section(s, groups)
 
+    # Approvals are never retried: one openFDA lookup per question.
     retry = [
         s["tool"] for s in sections
         if not s.get("items") and not s.get("error") and not s.get("timed_out")
+        and s["tool"] != "search_fda"
         and entity and entity.lower() != (s.get("query") or "").lower()
     ]
     used_fallback = None
@@ -1234,8 +1455,9 @@ async def _execute_only(
             if s.get("items"):
                 used_fallback = entity
                 first["items"] = s["items"]
-                if "items_key" in s:
-                    first["items_key"] = s["items_key"]
+                for extra in ("items_key", "items_relevant"):
+                    if extra in s:
+                        first[extra] = s[extra]
                 first["filtered_out"] = s.get("filtered_out", 0)
             elif s.get("filtered_out"):
                 first["filtered_out"] = first.get("filtered_out", 0) + s["filtered_out"]
@@ -1243,7 +1465,9 @@ async def _execute_only(
     out: list[dict] = []
     for name in tools:
         s = by_tool.get(name) or {"tool": name, "kind": _KINDS[name], "query": "", "items": []}
-        if not s.get("items"):
+        if name == "search_fda" and "note" not in s:
+            s["note"] = dict(_FDA_NOTE)
+        if not s.get("items") and not s.get("empty_reason"):
             s["empty_reason"] = _empty_reason(s)
         if not s.get("filtered_out"):
             s.pop("filtered_out", None)
@@ -1297,6 +1521,7 @@ async def _explore_only_uncached(
     input_text: str, kinds: list[str], since_year: int | None, status_filter: list[str] | None,
     source_filters: dict | None = None,
 ) -> dict:
+    _start_deadline()
     text = input_text.strip()
     intent = query_intent.parse(text)
     scope, scope_source = await _scope_for_only(input_text, intent)
@@ -1331,6 +1556,7 @@ async def _explore_uncached(
     status_filter: list[str] | None = None, source_filters: dict | None = None,
 ) -> dict:
     """The real orchestration: extract scope, route, fan out, assemble."""
+    _start_deadline()
     if not (input_text or "").strip():
         chosen = list(_DEFAULT_TOOLS)
         if scope_terms:
@@ -1375,13 +1601,19 @@ async def _explore_uncached(
         chosen.append("search_preprints")
     # FDA approvals ride along with any disease in a typed search (a router that
     # skipped it would hide approved drugs for a named disease).
+    # A named drug gets the drug-name lookup the same way.
     if (
         (input_text or "").strip()
-        and scope.get("diseases")
+        and (scope.get("diseases") or scope.get("assets"))
         and "search_fda" not in chosen
-        and _query_for("search_fda", scope)
+        and _fda_plan(scope)
     ):
         chosen.append("search_fda")
+    # GEO expression series are noise for a question about software, unless it
+    # also asks about data.
+    if (input_text or "").strip() and "search_datasets" in chosen \
+            and _is_tool_query_without_data(input_text, scope):
+        chosen.remove("search_datasets")
     # Same for news: always look, it's a cheap filter over cached RSS feeds and
     # returns nothing (section hidden) when no headline matches.
     if (input_text or "").strip() and "search_news" not in chosen:
@@ -1502,7 +1734,7 @@ async def explore_async(
             TTL_TOPIC, STALE_TOPIC,
         )
         if _has_failed_section(only_result):
-            await cache.expire_soon(normalize_key(only_key, input_text))
+            await cache.expire_soon(normalize_key(only_key, input_text), _TIMED_OUT_RECHECK)
         return only_result
 
     base_key = "explore:interests" if terms else "explore"
@@ -1524,7 +1756,7 @@ async def explore_async(
     if _has_failed_section(result):
         # A section timed out or failed: don't pin this page for the full TTL while its
         # fetch finishes in the background (see _capped).
-        await cache.expire_soon(key)
+        await cache.expire_soon(key, _TIMED_OUT_RECHECK)
     return result
 
 

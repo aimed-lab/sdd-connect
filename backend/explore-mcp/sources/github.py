@@ -77,6 +77,11 @@ async def fetch_github(client: httpx.AsyncClient, term: str, cap: int) -> list[I
             else None
         )
 
+        # The search response already carries the license, language, topics
+        # and pushed_at; response.py passes these (and only these) through.
+        lic = (r.get("license") or {}).get("spdx_id") if isinstance(r.get("license"), dict) else None
+        raw = {**r, "license_spdx": lic if lic and lic != "NOASSERTION" else None}
+
         items.append(
             Item(
                 id=f"github:{full_name}",
@@ -89,7 +94,7 @@ async def fetch_github(client: httpx.AsyncClient, term: str, cap: int) -> list[I
                 date_iso=iso_date,
                 signal=signal,   # REAL stars metric; never fabricated
                 dedupe_key=dedupe_key(html_url, full_name),
-                raw=r,
+                raw=raw,
             )
         )
     return filter_quality(items)
