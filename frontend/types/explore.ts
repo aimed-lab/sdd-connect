@@ -59,6 +59,8 @@ export type ExploreSection = {
   /** A short source caveat with a link, e.g. the FDA data-lag note on the
    *  approvals section. */
   note?: { text: string; url?: string };
+  /** How the query was read for this source, when the backend sends it. */
+  interpreted?: unknown;
 };
 
 /** The structured scope the backend either extracted from a search or used for
@@ -80,6 +82,22 @@ export type TrialRaw = {
   overall_status?: string | null;
   why_stopped?: string | null;
   phase?: string | null;
+  interventions?: { type?: string | null; name?: string | null }[] | null;
+  lead_sponsor?: string | null;
+  conditions?: string[] | null;
+  /** Up to 5 sites (backend `_locations`); `site_count` is the full number. */
+  sites?: { facility?: string; city?: string; state?: string; country?: string; status?: string }[] | null;
+  site_count?: number | null;
+  location_states?: string[] | null;
+  /** Shown when present: strings or {facility, city, state, country}. */
+  locations?: unknown[] | null;
+  eligibility?: {
+    min_age?: string;
+    max_age?: string;
+    sex?: string;
+    healthy_volunteers?: boolean;
+    criteria_excerpt?: string;
+  } | null;
 };
 
 /** backend/explore-mcp/sources/openfda.py's `raw` shape (kind "approval").
@@ -187,6 +205,9 @@ export type ExploreResponse = {
   reasoning?: string | null;
   sections: ExploreSection[];
   error?: boolean;
+  /** What the search was read as (backend `_interpreted`: entities,
+   *  filters, not_applied, label); shown when present. */
+  interpreted?: unknown;
   /** Set with a 429: the caller sent too many searches in a short time. */
   rate_limited?: boolean;
   /** A reason to show instead of the generic error copy (400 / 429). */

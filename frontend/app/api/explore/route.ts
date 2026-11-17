@@ -3,6 +3,7 @@ import { getCurrentUserInterests } from "@/lib/server/interests";
 import { getProject } from "@/lib/server/projects";
 import { buildProjectExploreQuery } from "@/lib/projectTypes";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
+import { cleanSectionTitles } from "@/lib/server/explore/exploreLayout";
 import { clientIp, createRateLimiter } from "@/lib/server/rateLimit";
 import {
   EXPLORE_BODY_MAX_CHARS,
@@ -130,6 +131,7 @@ export async function POST(req: Request) {
     });
     if (!res.ok) throw new Error(`explore backend responded ${res.status}`);
     const data = await res.json();
+    if (data && Array.isArray(data.sections)) data.sections = cleanSectionTitles(data.sections);
     return NextResponse.json(data);
   } catch {
     return NextResponse.json({ sections: [], scope: {}, error: true }, { status: 200 });

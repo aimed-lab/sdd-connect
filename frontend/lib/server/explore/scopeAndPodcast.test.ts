@@ -131,6 +131,34 @@ test("queryTerms: lowercase words, deduped", () => {
   assert.deepEqual(queryTerms("  "), []);
 });
 
+test("queryTerms: filler words are dropped, unless the query is only filler words", () => {
+  assert.deepEqual(queryTerms("AI in drug discovery"), ["ai", "drug", "discovery"]);
+  assert.deepEqual(queryTerms("What is the role of ALS genetics?"), ["role", "als", "genetics"]);
+  assert.deepEqual(queryTerms("the in"), ["the", "in"]);
+});
+
+test("a filler word in the query does not have to appear in the episode", () => {
+  const list = [ep(1, { title: "AI for drug discovery" }), ep(2, { transcript: "drug discovery without any of those words" })];
+  assert.deepEqual(searchEpisodes(list, "AI in drug discovery").map((h) => h.slug), ["ep-1"]);
+});
+
+test("equal scores are broken by how densely the transcript mentions the terms, not by its length", () => {
+  const filler = "word ".repeat(400);
+  const list = [
+    ep(30, { transcript: `sepsis ${filler} sepsis ${filler} sepsis` }),
+    ep(20, { transcript: "sepsis alerts. sepsis models. sepsis care." }),
+    ep(10, { transcript: `${filler} sepsis` }),
+  ];
+  const hits = searchEpisodes(list, "sepsis");
+  assert.ok(hits.every((h) => h.score === hits[0].score));
+  assert.deepEqual(hits.map((h) => h.slug), ["ep-20", "ep-30", "ep-10"]);
+});
+
+test("with no transcript to compare, newer episodes still come first", () => {
+  const list = [ep(1, { title: "Sepsis one" }), ep(2, { title: "Sepsis two" })];
+  assert.deepEqual(searchEpisodes(list, "sepsis").map((h) => h.slug), ["ep-2", "ep-1"]);
+});
+
 test("search finds a guest named in the title", () => {
   const hits = searchEpisodes(EPISODES, "okafor");
   assert.deepEqual(hits.map((h) => h.slug), ["ep-10"]);
@@ -166,6 +194,20 @@ test("every term must match (AND); terms may sit in different fields", () => {
 test("matching is by word prefix, not by substring", () => {
   assert.deepEqual(searchEpisodes(EPISODES, "deliv").map((h) => h.slug), ["ep-10"]);
   assert.deepEqual(searchEpisodes([ep(1, { transcript: "an available domain" })], "ai"), [], "'ai' is not inside 'available'");
+});
+
+test("a short term like ALS matches the whole word only, not 'also' or 'trials'", () => {
+  const list = [
+    ep(1, { title: "Running trials", description: "We also cover models.", transcript: "Trials, also, alsace." }),
+    ep(2, { title: "Living with ALS", transcript: "ALS patients and their families." }),
+    ep(3, { description: "Drug development for amyotrophic lateral sclerosis (ALS)." }),
+  ];
+  assert.deepEqual(searchEpisodes(list, "ALS").map((h) => h.slug), ["ep-2", "ep-3"]);
+  assert.deepEqual(searchEpisodes([ep(4, { transcript: "Two AIs talked." })], "ai").map((h) => h.slug), ["ep-4"], "a plural still matches");
+  assert.deepEqual(highlightParts("ALS is not also", ["als"]), [
+    { text: "ALS", hit: true },
+    { text: " is not also", hit: false },
+  ]);
 });
 
 test("title matches rank above description/topics, which rank above transcript-only", () => {

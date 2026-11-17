@@ -8,6 +8,7 @@
 
 import type { ExploreItem, ExploreSection } from "@/types/explore";
 import { phaseLabel, shortDate, sourceName, statusLabel } from "../communityHome/communityHome.ts";
+import { cleanText } from "../../sanitizeText.ts";
 
 // ── the landing question box ────────────────────────────────────────────────
 
@@ -228,6 +229,34 @@ export function resultTabs(sections: ExploreSection[]): ResultTab[] {
 export function categoryToTab(category: string | null | undefined, tabs: ResultTab[]): string {
   const c = (category ?? "").trim();
   return c && tabs.some((t) => t.key === c) ? c : "all";
+}
+
+/** Sections with every item title as plain text: sources such as Europe PMC
+ *  send markup like "<i>Hras<sup>G12V</sup></i>" in titles. */
+export function cleanSectionTitles(sections: ExploreSection[]): ExploreSection[] {
+  const clean = (items: ExploreItem[]) => items.map((i) => (typeof i.title === "string" ? { ...i, title: cleanText(i.title) } : i));
+  return sections.map((s) => ({
+    ...s,
+    items: clean(s.items ?? []),
+    ...(s.items_key ? { items_key: clean(s.items_key) } : {}),
+  }));
+}
+
+/** The always-shown kinds (FIXED_RESULT_TABS) a search found nothing for, so
+ *  the All view can say so instead of leaving them out silently. A kind whose
+ *  source failed is listed under `failed`, not `empty`. */
+const MISSING_LABEL: Record<string, string> = { paper: "papers", trial: "clinical trials", approval: "FDA approvals", compound: "compounds", dataset: "datasets", grant: "grants" };
+
+export function missingKinds(sections: ExploreSection[]): { empty: string[]; failed: string[] } {
+  const empty: string[] = [];
+  const failed: string[] = [];
+  for (const t of FIXED_RESULT_TABS) {
+    if (countOfKind(sections, t.key) > 0) continue;
+    const label = MISSING_LABEL[t.key] ?? t.label.toLowerCase();
+    if (sections.some((s) => s.kind === t.key && !!s.error)) failed.push(label);
+    else empty.push(label);
+  }
+  return { empty, failed };
 }
 
 export type MixedGroup = { kind: string; label: string; items: ExploreItem[]; total: number };

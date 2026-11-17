@@ -47,9 +47,27 @@ export default function CommunityMatches({
   }
   if (state.matches.length === 0) {
     return (
-      <p className="font-body-md text-body-md text-on-background">
-        No existing community matches &ldquo;{state.query}&rdquo;.
-      </p>
+      <div className="flex flex-col gap-1">
+        <p className="font-body-md text-body-md text-on-background">
+          No existing community matches &ldquo;{state.query}&rdquo;.
+        </p>
+        <p className="font-body-sm text-body-sm text-secondary">
+          Try a shorter topic, or{" "}
+          <Link href="/communities" className="text-primary hover:underline underline-offset-4">
+            browse all communities
+          </Link>
+          .
+          {!state.signedIn && (
+            <>
+              {" "}
+              <Link href={loginHref} className="text-primary hover:underline underline-offset-4">
+                Sign in
+              </Link>{" "}
+              to join or create one.
+            </>
+          )}
+        </p>
+      </div>
     );
   }
 

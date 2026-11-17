@@ -34,11 +34,14 @@ import QuestionBox from "@/components/explore/QuestionBox";
 import ResourceBento, { liveTile } from "@/components/explore/ResourceBento";
 import ResultsSidebar from "@/components/explore/ResultsSidebar";
 import { ApprovalTile, TILE_GRID, TrialTile } from "@/components/explore/ResultTiles";
+import TrialCompare from "@/components/explore/TrialCompare";
+import { emptyReasonText, MAX_COMPARE, noteText, toggleCompare } from "@/lib/server/explore/trialGlossary";
 import SectionHeading from "@/components/explore/SectionHeading";
 import TrialLandscape from "@/components/explore/TrialLandscape";
 import { BlockSkeleton, PageSkeleton } from "@/components/explore/Skeletons";
 import {
   categoryToTab,
+  missingKinds,
   mixedAll,
   resultTabs,
   scopeFromParam,
@@ -97,6 +100,9 @@ function TrialStatusControl({
     </div>
   );
 }
+
+/** "a", "a and b", "a, b and c". */
+const listJoin = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
 
 const SCOPE_LABEL: Record<ScopeKey, string> = {
   all: "everything",
@@ -186,6 +192,7 @@ function SearchResults() {
   const scope = scopeFromParam(categoryParam);
   const scoped = scope !== "all";
   const [selected, setSelected] = useState<string | null>(null);
+  const [compareIds, setCompareIds] = useState<string[]>([]);
   // Papers tab order: newest first (default) or "Most relevant" (typed searches).
   const [paperSort, setPaperSort] = useState<"newest" | "relevant">("newest");
   // Bumped by "Retry" on a source that didn't respond in time.
@@ -210,6 +217,7 @@ function SearchResults() {
     const useProjectContext = isFirstLoadRef.current && !!projectId;
     isFirstLoadRef.current = false;
     setSelected(null);
+    setCompareIds([]);
     (async () => {
       setLoading(true);
       setFailed(false);
@@ -368,18 +376,43 @@ function SearchResults() {
     );
   };
 
+  const trialNote = () => noteText(sectionOf("trial")?.interpreted ?? data?.interpreted);
+
   const trialSection = () => {
     if (trialView === "landscape") {
       return <TrialLandscape query={sectionOf("trial")?.query || topic} statusFilter={statusFilter} />;
     }
     const items = sortTrialsRecruitingFirst(itemsOf("trial"));
     if (items.length === 0) return null;
+    const note = trialNote();
+    const picked = compareIds.map((id) => items.find((i) => i.id === id)).filter((i): i is ExploreItem => !!i);
     return (
       <section key="trial">
         <SectionHeading title="Clinical trials" />
+        {note && <p className="mb-3 font-body-sm text-body-sm text-secondary">Searched for {note}</p>}
+        {items.length > 1 && (
+          <TrialCompare
+            items={picked}
+            onRemove={(id) => setCompareIds((ids) => ids.filter((x) => x !== id))}
+            onClear={() => setCompareIds([])}
+          />
+        )}
         <div className={TILE_GRID}>
           {items.map((item) => (
-            <TrialTile key={item.id} item={item} projectId={projectId} />
+            <TrialTile
+              key={item.id}
+              item={item}
+              projectId={projectId}
+              compare={
+                items.length > 1
+                  ? {
+                      selected: compareIds.includes(item.id),
+                      full: !compareIds.includes(item.id) && picked.length >= MAX_COMPARE,
+                      onToggle: () => setCompareIds((ids) => toggleCompare(ids, item.id)),
+                    }
+                  : undefined
+              }
+            />
           ))}
         </div>
       </section>
@@ -454,6 +487,7 @@ function SearchResults() {
   // bottom (there is no free patent API to search).
   const allView = () => {
     const groups = mixedAll(sections, 10);
+    const missing = missingKinds(sections);
     const q = encodeURIComponent(topic);
     return (
       <div className="space-y-10">
@@ -472,6 +506,20 @@ function SearchResults() {
             )}
           </section>
         ))}
+        {(missing.empty.length > 0 || missing.failed.length > 0) && (
+          <div className="rounded-xl bg-surface-container-low px-4 py-3 font-body-sm text-body-sm text-secondary" role="note">
+            {missing.empty.length > 0 && (
+              <p>
+                Nothing found for &ldquo;{topic}&rdquo; in {listJoin(missing.empty)}. Try a shorter query or a drug or gene name.
+              </p>
+            )}
+            {missing.failed.length > 0 && (
+              <p className={missing.empty.length > 0 ? "mt-1" : undefined}>
+                Couldn&apos;t search {listJoin(missing.failed)} right now. Try again in a moment.
+              </p>
+            )}
+          </div>
+        )}
         {topic.trim() && (
           <p className="font-body-sm text-body-sm text-secondary">
             Patents:{" "}
@@ -492,8 +540,16 @@ function SearchResults() {
     if (kind === "trial" && trialView === "landscape") return <div>{trialSection()}</div>;
     const section = sectionOf(kind);
     if (!section || section.items.length === 0) {
+      const reason = kind === "trial" ? emptyReasonText(section?.empty_reason) : null;
+      const note = kind === "trial" ? trialNote() : null;
       return (
-        <div>
+        <div className="space-y-4">
+          {(reason || note) && (
+            <div className="max-w-xl mx-auto font-body-sm text-body-sm text-secondary text-center" role="note">
+              {note && <p>Searched for {note}</p>}
+              {reason && <p className={note ? "mt-1" : undefined}>{reason}</p>}
+            </div>
+          )}
           {emptyCategory(kind)}
           {kind === "approval" && <div className="max-w-xl mx-auto text-center">{fdaNote("approval")}</div>}
         </div>
@@ -701,7 +757,7 @@ function SearchResults() {
                     <h2 className="mt-4 font-title text-[24px] font-medium text-on-background">
                       No results for &ldquo;{topic}&rdquo;
                     </h2>
-                    <p className="mt-2 text-secondary font-body-md">Try a broader term, or browse the full feed.</p>
+                    <p className="mt-2 text-secondary font-body-md">Try a shorter query or a drug or gene name, or browse the full feed.</p>
                   </>
                 )}
 
