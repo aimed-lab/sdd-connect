@@ -3,7 +3,7 @@ import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBack
 import { cleanSectionTitles } from "@/lib/server/explore/exploreLayout";
 import { buildExplorePayload } from "@/lib/server/explore/explorePayload";
 import { createRateLimiter } from "@/lib/server/rateLimit";
-import { EXPLORE_MAX_PER_WINDOW, SEARCH_WINDOW_MS } from "@/lib/server/searchRequest";
+import { EXPLORE_MAX_PER_WINDOW, SEARCH_WINDOW_MS, retryAfterHeaders } from "@/lib/server/searchRequest";
 
 // Proxy for the Python explore backend. POST { input } -> the backend's
 // { input, scope, tools_called, reasoning, sections } JSON. The backend exposes
@@ -60,7 +60,15 @@ const BACKEND_TIMEOUT_MS = 55_000;
 
 export async function POST(req: Request) {
   const prepared = await buildExplorePayload(req, limiter);
-  if (!prepared.ok) return prepared.response;
+  if (!prepared.ok) {
+    if (prepared.status === 429) {
+      return NextResponse.json(
+        { sections: [], scope: {}, error: true, rate_limited: true, message: prepared.message },
+        { status: 429, headers: retryAfterHeaders() }
+      );
+    }
+    return NextResponse.json({ sections: [], scope: {}, error: true, message: prepared.message }, { status: 400 });
+  }
   const { payload } = prepared;
 
   try {

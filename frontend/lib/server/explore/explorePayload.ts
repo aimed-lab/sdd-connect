@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getCurrentUserInterests } from "@/lib/server/interests";
 import { getProject } from "@/lib/server/projects";
 import { buildProjectExploreQuery } from "@/lib/projectTypes";
@@ -7,33 +6,25 @@ import {
   EXPLORE_BODY_MAX_CHARS,
   RATE_LIMITED_MESSAGE,
   parseExploreBody,
-  retryAfterHeaders,
 } from "@/lib/server/searchRequest";
 
 // The request side of /api/explore and /api/explore/stream: request limits,
 // body parsing, the project-derived input and the personalized landing-feed
-// scope. See app/api/explore/route.ts for why each step is done here.
+// scope. See app/api/explore/route.ts for why each step is done here. A
+// rejection is returned as its status and message; the routes build the 400 /
+// 429 bodies themselves (lib/server/openapi.test.ts reads them there).
 
 export type ExplorePayloadResult =
   | { ok: true; payload: Record<string, unknown> }
-  | { ok: false; response: NextResponse };
+  | { ok: false; status: 400 | 429; message: string };
 
 export async function buildExplorePayload(req: Request, limiter: RateLimiter): Promise<ExplorePayloadResult> {
   if (limiter.limited(clientIp(req))) {
-    return {
-      ok: false,
-      response: NextResponse.json(
-        { sections: [], scope: {}, error: true, rate_limited: true, message: RATE_LIMITED_MESSAGE },
-        { status: 429, headers: retryAfterHeaders() }
-      ),
-    };
+    return { ok: false, status: 429, message: RATE_LIMITED_MESSAGE };
   }
 
   if (Number(req.headers.get("content-length") ?? 0) > EXPLORE_BODY_MAX_CHARS) {
-    return {
-      ok: false,
-      response: NextResponse.json({ sections: [], scope: {}, error: true, message: "Request is too large." }, { status: 400 }),
-    };
+    return { ok: false, status: 400, message: "Request is too large." };
   }
   let raw = "";
   try {
@@ -45,10 +36,7 @@ export async function buildExplorePayload(req: Request, limiter: RateLimiter): P
   // sources with the typed text instead of letting its router decide.
   const parsed = parseExploreBody(raw);
   if (!parsed.ok) {
-    return {
-      ok: false,
-      response: NextResponse.json({ sections: [], scope: {}, error: true, message: parsed.message }, { status: 400 }),
-    };
+    return { ok: false, status: 400, message: parsed.message };
   }
   let input = parsed.input;
   const { personalize, projectId, sinceYear, statusFilter, onlyKinds } = parsed;
