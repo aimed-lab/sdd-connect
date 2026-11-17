@@ -113,13 +113,20 @@ _LOCATION = re.compile(
     r"\b(?:in|near|around|within)\s+(" + "|".join(sorted(map(re.escape, _PLACES), key=len, reverse=True)) + r")\b",
 )
 
+# "drug" is filler on its own ("KRAS drugs") but part of the topic in a field
+# name ("drug discovery", "drug repurposing"), so it stays before these nouns.
+_DRUG_HEAD_NOUNS = (
+    r"discovery|repurposing|repositioning|development|design|delivery|resistance|"
+    r"screening|safety|targets?|interactions?|combinations?|metabolism|toxicity|response"
+)
+
 # Words that describe what kind of result is wanted, not what it is about.
 _FILLER = re.compile(
     r"\b(?:competitive\s+landscape|landscape|pipeline|overview|state\s+of\s+the\s+art|"
     r"clinical\s+trials?|trials?|clinical\s+studies|studies|study|"
     r"papers?|articles?|publications?|preprints?|literature|reviews?|research|"
     r"tools?\s+and\s+databases|tools?|databases?|software|resources?|datasets?|"
-    r"news|headlines|updates?|drugs?(?![\w-])|"
+    r"news|headlines|updates?|drugs?(?![\w-])(?!\s+(?:" + _DRUG_HEAD_NOUNS + r")\b)|"
     r"what\s+are|show\s+me|find\s+me|find|list|search\s+for|look\s+for|"
     r"currently|right\s+now|now|today|this\s+year)\b",
     re.I,

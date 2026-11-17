@@ -91,7 +91,7 @@ from starlette.responses import JSONResponse
 import prewarm
 from cache import cache as _cache
 from response import trim_explore_result, trim_items
-from tools.explore import explore_async, normalize_only_kinds
+from tools.explore import explore_async, normalize_only_kinds, normalize_source_filters
 from tools.fetch_github_repo import fetch_github_repo_async
 from tools.find_provider import (
     classify_checklist_item_async,
@@ -115,6 +115,7 @@ from tools.search_tools import search_tools_async
 from tools.search_trials import search_trials_async
 from tools.search_wiki import get_wiki_page as _get_wiki_page
 from tools.search_wiki import search_wiki as _search_wiki
+from tools.trial_landscape import trial_landscape_async
 
 load_dotenv()
 
@@ -690,6 +691,9 @@ async def explore_http(request):
     # text as the query (no routing). Absent/empty/unknown -> normal behaviour.
     raw_only = body.get("only_kinds") if isinstance(body, dict) else None
     only_kinds = normalize_only_kinds(raw_only) or None
+    # Optional per-source filters (grant_open_only, grant_agencies, grant_sort,
+    # trial_location); see normalize_source_filters. Absent -> unchanged.
+    source_filters = normalize_source_filters(body) if isinstance(body, dict) else {}
     try:
         # trim_* only on egress — the cached copy keeps its full `raw` so the
         # citation graph stays rebuildable server-side (see response.py).
@@ -698,6 +702,7 @@ async def explore_http(request):
                 await explore_async(
                     input_text or "", scope_terms, since_year, status_filter,
                     **({"only_kinds": only_kinds} if only_kinds else {}),
+                    **({"source_filters": source_filters} if source_filters else {}),
                 )
             )
         )
@@ -705,6 +710,36 @@ async def explore_http(request):
         logger.exception("POST /api/explore failed: input=%r", input_text)
         return JSONResponse(
             {"input": input_text, "scope": {}, "tools_called": [], "sections": [], "error": str(exc)},
+            status_code=200,
+        )
+
+
+@mcp.custom_route("/api/trial-landscape", methods=["POST"])
+async def trial_landscape_http(request):
+    """Competitive-landscape view of ClinicalTrials.gov for one query (#82).
+
+      POST { "query": "<text>", "status_filter": [<str>...], "trial_location": "<str>" }
+      -> { query, total, fetched, shown, without_asset, partial, exhaustive: false,
+           groups: [{ asset, aliases, trial_count, rows: [{ phase, sponsor, trials }] }] }
+
+    One bounded, cached registry search (see tools/trial_landscape.py): at most
+    2 pages of 25 trials, no per-drug fan-out, no LLM. Never 500s the caller."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    query = body.get("query") if isinstance(body.get("query"), str) else ""
+    status_filter = body.get("status_filter") if isinstance(body.get("status_filter"), list) else None
+    location = body.get("trial_location") if isinstance(body.get("trial_location"), str) else None
+    try:
+        return JSONResponse(await trial_landscape_async(query, status_filter, location))
+    except Exception as exc:
+        logger.exception("POST /api/trial-landscape failed: query=%r", query)
+        return JSONResponse(
+            {"query": query, "total": None, "fetched": 0, "shown": 0, "without_asset": 0,
+             "partial": False, "exhaustive": False, "groups": [], "error": str(exc)},
             status_code=200,
         )
 

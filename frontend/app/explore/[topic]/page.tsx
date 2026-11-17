@@ -35,6 +35,7 @@ import ResourceBento, { liveTile } from "@/components/explore/ResourceBento";
 import ResultsSidebar from "@/components/explore/ResultsSidebar";
 import { ApprovalTile, TILE_GRID, TrialTile } from "@/components/explore/ResultTiles";
 import SectionHeading from "@/components/explore/SectionHeading";
+import TrialLandscape from "@/components/explore/TrialLandscape";
 import { BlockSkeleton, PageSkeleton } from "@/components/explore/Skeletons";
 import {
   categoryToTab,
@@ -109,6 +110,43 @@ const SCOPE_LABEL: Record<ScopeKey, string> = {
   news: "news",
 };
 
+// List of trial tiles, or the competitive landscape grouped by drug (#82).
+function TrialViewControl({
+  value,
+  onChange,
+}: {
+  value: "list" | "landscape";
+  onChange: (v: "list" | "landscape") => void;
+}) {
+  const options: { value: "list" | "landscape"; label: string }[] = [
+    { value: "list", label: "List" },
+    { value: "landscape", label: "Landscape" },
+  ];
+  return (
+    <div className="inline-flex items-center gap-1 p-1 rounded-lg bg-surface-container-low border border-outline-variant/30 w-fit">
+      {options.map((opt) => {
+        const active = opt.value === value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(opt.value)}
+            className={
+              "px-3 py-1.5 rounded-md font-label-md text-label-md whitespace-nowrap transition-all " +
+              (active
+                ? "bg-secondary-container text-on-secondary-container font-semibold shadow-sm"
+                : "text-secondary hover:text-on-background")
+            }
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function SearchResults() {
   const router = useRouter();
   const params = useParams<{ topic: string }>();
@@ -152,6 +190,7 @@ function SearchResults() {
   const [paperSort, setPaperSort] = useState<"newest" | "relevant">("newest");
   // Bumped by "Retry" on a source that didn't respond in time.
   const [retryNonce, setRetryNonce] = useState(0);
+  const [trialView, setTrialView] = useState<"list" | "landscape">("list");
 
   // FIRST LOAD ONLY: when arriving with a projectId (from "Explore for this
   // project" — see lib/projectTypes.ts:buildProjectExploreHref), `topic` is
@@ -245,14 +284,14 @@ function SearchResults() {
   // reflects the full response once loading is false).
   const capturedTopicRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!showError || capturedTopicRef.current === topic) return;
+    if (!showError || data?.rate_limited || capturedTopicRef.current === topic) return;
     capturedTopicRef.current = topic;
     submitFeedbackAction({
       page_path: `/explore/${encodeURIComponent(topic)}`,
       message: null,
       context: { query: topic, outcome: backendError ? "backend_error" : "empty" },
     });
-  }, [showError, backendError, topic]);
+  }, [showError, backendError, topic, data?.rate_limited]);
 
   useEffect(() => {
     if (scope === "episode") router.replace(`/explore/podcast?q=${encodeURIComponent(topic)}`);
@@ -330,6 +369,9 @@ function SearchResults() {
   };
 
   const trialSection = () => {
+    if (trialView === "landscape") {
+      return <TrialLandscape query={sectionOf("trial")?.query || topic} statusFilter={statusFilter} />;
+    }
     const items = sortTrialsRecruitingFirst(itemsOf("trial"));
     if (items.length === 0) return null;
     return (
@@ -447,6 +489,7 @@ function SearchResults() {
   };
 
   const selectedView = (kind: string) => {
+    if (kind === "trial" && trialView === "landscape") return <div>{trialSection()}</div>;
     const section = sectionOf(kind);
     if (!section || section.items.length === 0) {
       return (
@@ -622,6 +665,10 @@ function SearchResults() {
                   <p className="mb-2 text-secondary font-label-md text-label-md">Trial status</p>
                   <TrialStatusControl value={trialStatusParam ?? ""} onChange={onTrialStatusChange} />
                 </div>
+                <div>
+                  <p className="mb-2 text-secondary font-label-md text-label-md">View</p>
+                  <TrialViewControl value={trialView} onChange={setTrialView} />
+                </div>
               </div>
             )}
 
@@ -639,9 +686,13 @@ function SearchResults() {
                 {backendError ? (
                   <>
                     <span className="material-symbols-outlined text-5xl text-secondary/50">cloud_off</span>
-                    <h2 className="mt-4 font-title text-[24px] font-medium text-on-background">Couldn&apos;t search right now</h2>
+                    <h2 className="mt-4 font-title text-[24px] font-medium text-on-background">
+                      {data?.rate_limited ? "Too many searches" : <>Couldn&apos;t search right now</>}
+                    </h2>
                     <p className="mt-2 text-secondary font-body-md">
-                      The discovery backend didn&apos;t respond. This isn&apos;t about your search, please try again in a moment.
+                      {data?.message ?? (
+                        <>The discovery backend didn&apos;t respond. This isn&apos;t about your search, please try again in a moment.</>
+                      )}
                     </p>
                   </>
                 ) : (
