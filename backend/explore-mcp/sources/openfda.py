@@ -122,23 +122,61 @@ def _pretty_date(yyyymmdd: str) -> str:
     return f"{_MONTHS[int(yyyymmdd[4:6]) - 1]} {int(yyyymmdd[6:8])}, {yyyymmdd[:4]}"
 
 
-def _indication_text(label: dict) -> str | None:
-    """A short 'indications and usage' text from a label already fetched, or None."""
+def _indication_full(label: dict) -> str:
     text = " ".join(str(x) for x in (label.get("indications_and_usage") or []) if x)
     text = re.sub(r"^\s*\d*\s*INDICATIONS?\s*(AND|&)\s*USAGE:?\s*", "", text, flags=re.I)
-    text = re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _indication_text(label: dict) -> str | None:
+    """A short 'indications and usage' text from a label already fetched, or None."""
+    text = _indication_full(label)
     return (text[:300].rstrip() + "…") if len(text) > 300 else (text or None)
 
 
-async def fetch_fda_approvals(client: httpx.AsyncClient, disease: str, cap: int) -> list[Item]:
+# A label section number ("1.1 Non-Small Cell Lung Cancer ...") or a lone
+# "1" left at the start of the indication text.
+_SECTION_NUMBER_RE = re.compile(r"^\(?\d+(?:\.\d+)*\)?\s+")
+# A sentence ends at ". " followed by a capital, not after "e.g."/"i.e."/"approx." etc.
+_SENTENCE_END_RE = re.compile(r"(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\bapprox)\.\s+(?=[A-Z(\[])")
+_FIRST_SENTENCE_CHARS = 280
+
+
+def first_sentence(text: str | None) -> str | None:
+    """The indication's first sentence, verbatim (cut at a word boundary with
+    an ellipsis if it runs past _FIRST_SENTENCE_CHARS)."""
+    text = _SECTION_NUMBER_RE.sub("", (text or "").strip())
+    if not text:
+        return None
+    m = _SENTENCE_END_RE.search(text)
+    sentence = text[: m.start() + 1] if m else text
+    if len(sentence) > _FIRST_SENTENCE_CHARS:
+        sentence = sentence[:_FIRST_SENTENCE_CHARS].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+    return sentence
+
+
+def _drug_clause(drug: str) -> str:
+    """Label search by the drug's own name: generic OR brand (exact phrase)."""
+    q = quote(drug.strip(), safe="")
+    return f'(openfda.generic_name:"{q}"+OR+openfda.brand_name:"{q}")'
+
+
+async def fetch_fda_approvals(
+    client: httpx.AsyncClient, disease: str, cap: int, by: str = "indication",
+) -> list[Item]:
+    """`by="indication"` (default): labels whose indication mentions `disease`.
+    `by="drug"`: `disease` is a drug name, matched on the label's generic or
+    brand name instead. Either way it is ONE label search plus the batched
+    approval-date lookup; no retries."""
     disease = (disease or "").replace('"', " ").strip()
     if not disease:
         return []
     key = _api_key_param()
 
+    clause = _drug_clause(disease) if by == "drug" else _indication_clause(disease)
     label_url = (
         f"{_LABEL}?limit={_LABEL_LIMIT}&sort=effective_time:desc"
-        f"&search={_indication_clause(disease)}"
+        f"&search={clause}"
         "+AND+(openfda.application_number:NDA*+OR+openfda.application_number:BLA*)"
         f"{key}"
     )
@@ -159,6 +197,7 @@ async def fetch_fda_approvals(client: httpx.AsyncClient, disease: str, cap: int)
         seen_app.add(app)
         candidates.append({
             "indication": _indication_text(r),
+            "indication_first_sentence": first_sentence(_indication_full(r)),
             "app": app,
             "generic": generic.lower(),
             "brand": _first(of.get("brand_name")),
@@ -211,6 +250,7 @@ async def fetch_fda_approvals(client: httpx.AsyncClient, disease: str, cap: int)
                     "review_priority": priority,
                     # From the label already fetched above; no extra request.
                     "indication": c["indication"],
+                    "indication_first_sentence": c["indication_first_sentence"],
                 },
             )
         )

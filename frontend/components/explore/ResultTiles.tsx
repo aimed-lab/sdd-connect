@@ -7,6 +7,7 @@
 // border, serif title. Missing fields are hidden.
 
 import SaveButton from "@/components/explore/SaveButton";
+import { eligibilityText, locationList, phaseGloss, shortList, siteTotal, statusGloss } from "@/lib/server/explore/trialGlossary";
 import { kindLabel, relativeTime, TYPE_STYLES, typeKeyForKind } from "@/lib/typeStyles";
 import type { ApprovalRaw, ExploreItem, GrantRaw, TrialRaw } from "@/types/explore";
 
@@ -175,6 +176,7 @@ export function ApprovalTile({
   const brand = raw.brand?.trim() || item.title;
   const generic = raw.generic?.trim();
   const sponsor = raw.sponsor?.trim();
+  const indication = raw.indication_first_sentence?.trim();
   const chip = "px-2 py-0.5 rounded-full bg-white/55 text-[11px] whitespace-nowrap";
   return (
     <TileShell item={item}>
@@ -188,6 +190,10 @@ export function ApprovalTile({
         {brand}
       </h3>
       {generic && <p className="mt-0.5 text-[14px] leading-snug text-on-background/70">{generic}</p>}
+      {/* Verbatim from the FDA label. */}
+      {indication && (
+        <p className="mt-2 text-[13px] leading-snug text-on-background/75 line-clamp-4">{indication}</p>
+      )}
       {sponsor && <p className="mt-2 text-[13px] leading-snug text-on-background/70">{sponsor}</p>}
       {approvedText && <p className="mt-1 text-xs text-on-background/60">Approved {approvedText}</p>}
       {(priority || isNew) && (
@@ -208,30 +214,43 @@ export function ApprovalTile({
   );
 }
 
+export type TrialCompareControl = {
+  selected: boolean;
+  /** True when three trials are already picked and this is not one of them. */
+  full: boolean;
+  onToggle: () => void;
+};
+
 export function TrialTile({
   item,
   projectId,
   hideSave = false,
+  compare,
 }: {
   item: ExploreItem;
   projectId?: string;
   /** Leave out the bookmark (wiki pages have nothing to save into). */
   hideSave?: boolean;
+  /** Shows the "Compare" toggle (Explore's trial results only). */
+  compare?: TrialCompareControl;
 }) {
   const t = TYPE_STYLES[typeKeyForKind("trial")];
   const raw = (item.raw ?? {}) as TrialRaw;
-  const meta = [raw.nct_id, raw.phase].filter(Boolean).join(" · ");
+  const phase = phaseGloss(raw.phase);
+  const status = statusGloss(raw.overall_status);
+  const meta = [raw.nct_id, phase?.label].filter(Boolean).join(" · ");
+  const plain = [phase?.plain && `${phase.label}: ${phase.plain}`, status?.plain && `${status.label}: ${status.plain}`].filter(Boolean);
+  const places = locationList(raw);
+  const who = eligibilityText(raw);
   return (
     <TileShell item={item}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="type-label" style={{ color: t.fg }}>
           {kindLabel("trial")}
-          {raw.overall_status && (
+          {raw.overall_status && status && (
             <>
               {" · "}
-              <span style={{ color: statusColor(raw.overall_status) }}>
-                {raw.overall_status.replace(/_/g, " ")}
-              </span>
+              <span style={{ color: statusColor(raw.overall_status) }}>{status.label}</span>
             </>
           )}
         </span>
@@ -241,11 +260,41 @@ export function TrialTile({
         {item.title}
       </h3>
       {meta && <p className="mt-2 text-xs text-on-background/60">{meta}</p>}
+      {plain.length > 0 && (
+        <div className="mt-1.5 space-y-0.5 text-xs leading-snug text-on-background/70">
+          {plain.map((line) => (
+            <p key={line}>{line}</p>
+          ))}
+        </div>
+      )}
+      {places.length > 0 && (
+        <p className="mt-1.5 text-xs leading-snug text-on-background/70">Where: {shortList(places, 3, siteTotal(raw))}</p>
+      )}
+      {who && <p className="mt-1 text-xs leading-snug text-on-background/70">Who can join: {who}</p>}
       {/* Verbatim from ClinicalTrials.gov, never paraphrased or summarised. */}
       {raw.why_stopped && (
         <p className="mt-2 text-[13px] leading-snug italic text-on-background/75">
           &ldquo;{raw.why_stopped}&rdquo;
         </p>
+      )}
+      {compare && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            compare.onToggle();
+          }}
+          disabled={compare.full}
+          aria-pressed={compare.selected}
+          title={compare.full ? "You can compare up to 3 trials" : undefined}
+          className="mt-3 inline-flex items-center gap-1 rounded-full bg-white/60 px-3 py-1 text-xs font-medium text-on-background hover:bg-white disabled:opacity-50 disabled:hover:bg-white/60"
+        >
+          <span className="material-symbols-outlined text-[16px] leading-none" aria-hidden="true">
+            {compare.selected ? "check_box" : "check_box_outline_blank"}
+          </span>
+          Compare
+        </button>
       )}
     </TileShell>
   );

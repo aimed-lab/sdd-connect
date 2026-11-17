@@ -41,6 +41,10 @@ def _api_key_param() -> str:
     return f"&api_key={quote(key)}" if key else ""
 
 
+# Plain-text abstract kept in raw (see fetch_openalex); enough for an excerpt
+# and for term matching, small enough to cache a 75-work pool.
+_ABSTRACT_KEEP_CHARS = 2000
+
 # OpenAlex sort for recency-first callers (search_news). Kept as the DEFAULT so
 # this function's existing behaviour is unchanged for anyone not passing `sort`.
 SORT_RECENT = "publication_date:desc"
@@ -80,10 +84,13 @@ async def fetch_openalex(
     # carry OpenAlex raw (see ranking.py's _work_index docstring).
     url += (
         "&select=id,title,publication_date,primary_location,authorships,"
-        "doi,cited_by_count,referenced_works"
+        "doi,cited_by_count,referenced_works,abstract_inverted_index"
     )
     url += _api_key_param()
     data = await get_json(client, url)
+
+    # Lazy: tools.abstracts imports this module at load time.
+    from tools.abstracts import rebuild_inverted_index
 
     items: list[Item] = []
     for w in (data or {}).get("results") or []:
@@ -123,6 +130,13 @@ async def fetch_openalex(
             if isinstance(cited, (int, float)) and not isinstance(cited, bool)
             else None
         )
+
+        # The inverted index is several times the size of the text it encodes,
+        # so raw keeps the rebuilt plain text (capped) instead.
+        w = dict(w)
+        abstract = rebuild_inverted_index(w.pop("abstract_inverted_index", None))
+        if abstract:
+            w["abstract"] = abstract[:_ABSTRACT_KEEP_CHARS]
 
         items.append(
             Item(

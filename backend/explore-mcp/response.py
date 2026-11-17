@@ -79,6 +79,16 @@ _INTERNAL_SOURCES = {"internal", "geo", "pager", "clinicaltrials", "chembl", "op
 #   sources      -> dedupe.merge_items(), shown as provenance
 _EXTERNAL_RAW_KEEP = frozenset({"prior_signal", "sources"})
 
+# Per-source additions to that allow-list (kind "tool" from GitHub search):
+#   license_spdx -> the SPDX id (e.g. "MIT"), None when GitHub could not tell
+#   language     -> the repo's main language
+#   topics       -> the repo's own topic tags
+#   pushed_at    -> the last push to any branch: shown as "last code update",
+#                   NOT a release date
+_SOURCE_RAW_KEEP: dict[str, frozenset[str]] = {
+    "github": frozenset({"license_spdx", "language", "topics", "pushed_at"}),
+}
+
 
 def trim_item(item: dict[str, Any]) -> dict[str, Any]:
     """Return `item` with a client-sized `raw`. Never mutates the input — the
@@ -94,7 +104,8 @@ def trim_item(item: dict[str, Any]) -> dict[str, Any]:
     if item.get("source") in _INTERNAL_SOURCES:
         return item
 
-    kept = {k: v for k, v in raw.items() if k in _EXTERNAL_RAW_KEEP}
+    keep = _EXTERNAL_RAW_KEEP | _SOURCE_RAW_KEEP.get(item.get("source"), frozenset())
+    kept = {k: v for k, v in raw.items() if k in keep}
     return {**item, "raw": kept}
 
 

@@ -3,7 +3,8 @@
 // The right-hand column of /explore/<topic> (below the results on a phone):
 // follow this topic (starts the assistant's usual wiki-page save flow, with its
 // confirm step), ask a follow-up (two suggestions that open the assistant), and
-// people on this (the best matching community, or nothing).
+// people on this (the best matching community, or a short note when none
+// matches; hidden only when the check itself failed).
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -34,7 +35,7 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 function PeopleOnThis({ topic }: { topic: string }) {
   const { user } = useAuth();
   const [match, setMatch] = useState<CommunityMatch | null>(null);
-  const [checked, setChecked] = useState(false);
+  const [none, setNone] = useState(false);
   const [done, setDone] = useState<"active" | "pending" | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +43,7 @@ function PeopleOnThis({ topic }: { topic: string }) {
   useEffect(() => {
     let cancelled = false;
     setMatch(null);
-    setChecked(false);
+    setNone(false);
     setDone(null);
     (async () => {
       try {
@@ -54,12 +55,11 @@ function PeopleOnThis({ topic }: { topic: string }) {
         );
         // Prefer a community the viewer is not in yet.
         const best = pickPeopleMatch(valid);
-        if (!cancelled) {
-          if (best) setMatch(best);
-          setChecked(true);
-        }
+        if (cancelled) return;
+        if (best) setMatch(best);
+        else if (res.ok) setNone(true);
       } catch {
-        /* nothing matches, or the check failed: the card stays hidden */
+        /* the check failed: the card stays hidden */
       }
     })();
     return () => {
@@ -67,17 +67,22 @@ function PeopleOnThis({ topic }: { topic: string }) {
     };
   }, [topic]);
 
-  const loginHref = `/login?callbackUrl=${encodeURIComponent(`/explore/${encodeURIComponent(topic)}`)}`;
-
   if (!match) {
-    // Signed out, communities with few members are not listed; say so rather than show nothing.
-    if (!checked || user) return null;
+    if (!none) return null;
     return (
       <Card title="People on this">
-        <p className="font-body-sm text-body-sm text-secondary">No listed community matches this topic yet.</p>
-        <Link href={loginHref} className="font-label-md text-label-md text-primary hover:underline underline-offset-4">
-          {SIGNED_OUT_MATCH_NOTE}
-        </Link>
+        <p className="font-body-sm text-body-sm text-secondary break-words">
+          No {user ? "" : "listed "}community matches &ldquo;{topic}&rdquo; yet. Try a shorter topic, or{" "}
+          <Link href="/communities" className="text-primary hover:underline underline-offset-4">
+            browse all communities
+          </Link>
+          .
+        </p>
+        {!user && (
+          <Link href={loginHref(topic)} className="font-label-md text-label-md text-primary hover:underline underline-offset-4">
+            {SIGNED_OUT_MATCH_NOTE}
+          </Link>
+        )}
       </Card>
     );
   }
@@ -125,10 +130,10 @@ function PeopleOnThis({ topic }: { topic: string }) {
         </p>
       ) : act.kind === "signin" ? (
         <>
-          <Link href={loginHref} className="btn-primary self-start px-4 py-2 rounded-lg font-label-md text-label-md">
+          <Link href={loginHref(topic)} className="btn-primary self-start px-4 py-2 rounded-lg font-label-md text-label-md">
             {act.label}
           </Link>
-          <Link href={loginHref} className="font-body-sm text-body-sm text-primary hover:underline underline-offset-4">
+          <Link href={loginHref(topic)} className="font-body-sm text-body-sm text-primary hover:underline underline-offset-4">
             {SIGNED_OUT_MATCH_NOTE}
           </Link>
         </>

@@ -7,7 +7,9 @@ import assert from "node:assert/strict";
 import {
   EXAMPLE_TOPICS,
   categoryToTab,
+  cleanSectionTitles,
   latestEpisode,
+  missingKinds,
   mixedAll,
   newestOf,
   pickCommunities,
@@ -190,4 +192,31 @@ test("mixedAll: nothing in, nothing out; small result sets show everything", () 
   assert.deepEqual(mixedAll([]), []);
   const small = mixedAll([section("approval", 1), section("paper", 2)]);
   assert.equal(small.reduce((n, g) => n + g.items.length, 0), 3);
+});
+
+// ── titles and empty kinds ───────────────────────────────────────────────────
+
+test("cleanSectionTitles: markup and extra spaces are removed from titles, key papers too", () => {
+  const raw = [
+    { kind: "preprint", items: [item("preprint", "a", { title: "<i>  Hras  <sup>G12V</sup>  </i>  induces thyroid cancer" })] },
+    { kind: "paper", items: [item("paper", "b", { title: "p &lt; 0.05 in <scp>SDG</scp>" })], items_key: [item("paper", "b", { title: "<b>Key</b>" })] },
+  ] as never;
+  const out = cleanSectionTitles(raw);
+  assert.equal(out[0].items[0].title, "Hras G12V induces thyroid cancer");
+  assert.equal(out[1].items[0].title, "p < 0.05 in SDG");
+  assert.equal(out[1].items_key![0].title, "Key");
+  assert.equal(out[0].items[0].id, "a");
+});
+
+test("missingKinds: the always-shown kinds with nothing, failed sources listed apart", () => {
+  const secs = [
+    section("paper", 3),
+    section("dataset", 1),
+    { kind: "grant", items: [], error: "timeout" },
+  ] as never;
+  assert.deepEqual(missingKinds(secs), {
+    empty: ["clinical trials", "FDA approvals", "compounds"],
+    failed: ["grants"],
+  });
+  assert.deepEqual(missingKinds([]).empty.length, 6);
 });

@@ -57,10 +57,20 @@ export default function CommunityMatches({
         <p className="font-body-md text-body-md text-on-background">
           No existing community matches &ldquo;{state.query}&rdquo;.
         </p>
-        {!state.signedIn && (
-          <Link href={loginHref} className="font-body-sm text-body-sm text-primary hover:underline underline-offset-4">
-            {SIGNED_OUT_MATCH_NOTE}
+        <p className="font-body-sm text-body-sm text-secondary">
+          Try a shorter topic, or{" "}
+          <Link href="/communities" className="text-primary hover:underline underline-offset-4">
+            browse all communities
           </Link>
+          .
+        </p>
+        {!state.signedIn && (
+          <p className="font-body-sm text-body-sm text-secondary">
+            <Link href={loginHref} className="text-primary hover:underline underline-offset-4">
+              {SIGNED_OUT_MATCH_NOTE}
+            </Link>{" "}
+            Signing in also lets you join or create one.
+          </p>
         )}
       </div>
     );

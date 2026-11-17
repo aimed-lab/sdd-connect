@@ -3,8 +3,11 @@ tools/search_preprints.py — search preprints (bioRxiv, medRxiv, Research Squar
 ...) on Europe PMC.
 
 Wraps sources.europepmc.fetch_preprints. kind="preprint", source="europepmc",
-signal=None (no ranking metric). The source call is isolated — a failure
-degrades to an empty list rather than raising.
+signal=None (no ranking metric). A failed Europe PMC call is retried once and
+then RAISED, not turned into an empty list: an empty list is cached (and the
+whole Explore response with it), so one upstream hiccup used to pin an empty
+preprint section for an hour. The one caller, explore, already isolates a
+raising source: it marks the section with `error` and expires the page soon.
 """
 
 from __future__ import annotations
@@ -29,13 +32,22 @@ async def search_preprints_async(query: str, limit: int = 20) -> list[Item]:
     )
 
 
+_ATTEMPTS = 2
+
+
 async def _fetch(query: str, limit: int) -> list[Item]:
-    try:
-        async with httpx.AsyncClient() as client:
-            return await fetch_preprints(client, query, limit)
-    except Exception:
-        logger.exception("search_preprints: europepmc fetch failed for query=%r", query)
-        return []   # per-source isolation
+    async with httpx.AsyncClient() as client:
+        for attempt in range(1, _ATTEMPTS + 1):
+            try:
+                return await fetch_preprints(client, query, limit)
+            except Exception as exc:
+                logger.warning(
+                    "search_preprints: europepmc attempt %d/%d failed for query=%r: %s: %s",
+                    attempt, _ATTEMPTS, query, type(exc).__name__, exc,
+                )
+                if attempt == _ATTEMPTS:
+                    raise
+    return []
 
 
 def search_preprints(query: str, limit: int = 20) -> list[Item]:

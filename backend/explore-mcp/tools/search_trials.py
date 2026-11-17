@@ -27,30 +27,39 @@ _HEADERS = {"Accept": "application/json"}
 
 async def search_trials_async(
     query: str, limit: int = 20, status_filter: list[str] | None = None,
-    condition_only: bool = False, extra_term: str | None = None,
+    condition_only: bool = False, extra_term: str | None = None, location: str | None = None,
 ) -> list[Item]:
     """Cached + single-flighted (see _fetch). `status_filter` (e.g.
     ["TERMINATED", "WITHDRAWN"]) is part of the cache key — a status-filtered
     search and an unfiltered one for the same term are different results and
     must not share a cache entry. `condition_only` (query.cond instead of
     query.term) is keyed the same way, as is `extra_term` (query.cond +
-    query.term together)."""
+    query.term together), and `location` (query.locn, e.g. a US state)."""
     status_key = ",".join(status_filter) if status_filter else ""
     mode_key = "cond" if condition_only else "term"
     if condition_only and extra_term:
         mode_key += f"+{extra_term.strip().lower()}"
-    key = normalize_key(f"trials:{limit}:{status_key}:{mode_key}", query)
+    location = (location or "").strip() or None
+    namespace = f"trials:{limit}:{status_key}:{mode_key}"
+    if location:
+        namespace += f":locn={location.lower()}"
+    key = normalize_key(namespace, query)
     return await cache.get_or_compute(
-        key, lambda: _fetch(query, limit, status_filter, condition_only, extra_term), TTL_SOURCE, STALE_SOURCE
+        key, lambda: _fetch(query, limit, status_filter, condition_only, extra_term, location),
+        TTL_SOURCE, STALE_SOURCE,
     )
 
 
 async def _fetch(
     query: str, limit: int, status_filter: list[str] | None = None, condition_only: bool = False,
-    extra_term: str | None = None,
+    extra_term: str | None = None, location: str | None = None,
 ) -> list[Item]:
     try:
         async with httpx.AsyncClient(headers=_HEADERS) as client:
+            if location:
+                return await fetch_trials(
+                    client, query, limit, status_filter, condition_only, extra_term, location=location
+                )
             return await fetch_trials(client, query, limit, status_filter, condition_only, extra_term)
     except Exception:
         logger.exception("search_trials: clinicaltrials.gov fetch failed for query=%r", query)
@@ -75,14 +84,16 @@ def merge_trials(gene_matched: list[Item], condition_only: list[Item], limit: in
 
 
 async def search_trials_with_gene_async(
-    condition: str, gene: str, limit: int = 20, status_filter: list[str] | None = None
+    condition: str, gene: str, limit: int = 20, status_filter: list[str] | None = None,
+    location: str | None = None,
 ) -> list[Item]:
     """For a scope with BOTH a disease and a gene: (a) condition + gene as
     term and (b) condition only, in parallel, merged by merge_trials(). The
-    status filter applies to both."""
+    status and location filters apply to both."""
+    loc = {"location": location} if location else {}
     gene_matched, condition_only = await asyncio.gather(
-        search_trials_async(condition, limit, status_filter, condition_only=True, extra_term=gene),
-        search_trials_async(condition, limit, status_filter, condition_only=True),
+        search_trials_async(condition, limit, status_filter, condition_only=True, extra_term=gene, **loc),
+        search_trials_async(condition, limit, status_filter, condition_only=True, **loc),
     )
     return merge_trials(gene_matched, condition_only, limit)
 

@@ -24,8 +24,11 @@ if the routing JSON can't be parsed.
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import datetime
 import json
 import logging
+import os
 import re
 
 import llm
@@ -41,9 +44,11 @@ from cache import (
     cache,
     normalize_key,
 )
+from tools import query_intent
+from tools.abstracts import attach_abstract_excerpts
 from tools.search_chembl import search_chembl_async
 from tools.search_datasets import search_datasets_async
-from tools.search_fda import search_fda_async
+from tools.search_fda import boost_distinctive, search_fda_async
 from tools.search_grants import search_grants_async
 from tools.search_lab_resources import search_lab_resources
 from tools.search_news import search_news_async
@@ -863,10 +868,63 @@ def _dispatch(name: str, query: str):
 
 
 # Overall cap per tool when fanning out. A tool that exceeds it yields an empty
-# section so the page still loads, but its fetch keeps running (shielded) and
-# lands in the per-tool cache for the next search.
+# section flagged `timed_out` (the UI shows "didn't respond in time — retry"),
+# but its fetch keeps running (shielded) and lands in the per-tool cache, so a
+# retry a few seconds later is served from it.
+#
+# _TOOL_TIMEOUT is the ceiling; _SOURCE_TIMEOUTS tightens it per source, and
+# the whole explore call also has a deadline (_explore_deadline_seconds,
+# measured from the start of the request, LLM steps included) that every
+# source's cap is clipped to. The deadline sits well below the Next.js proxy's
+# maxDuration (frontend/app/api/explore/route.ts), so the page always gets an
+# answer with the slow sources marked instead of the whole request dying.
 _TOOL_TIMEOUT = 20.0
+_SOURCE_TIMEOUTS: dict[str, float] = {
+    "search_papers": 18.0,       # 3 sources x entity fan-out + abstract excerpts
+    "search_preprints": 12.0,
+    "search_trials": 12.0,
+    "search_fda": 10.0,
+    "search_grants": 12.0,
+    "search_tools": 10.0,
+    "search_datasets": 12.0,
+    "search_pager": 12.0,
+    "search_chembl": 15.0,
+    "search_opentargets": 15.0,
+    "search_news": 8.0,
+    "search_lab_resources": 8.0,
+    "search_people": 8.0,
+    "search_wiki": 8.0,
+}
+_DEFAULT_DEADLINE = 25.0
+_MIN_REMAINING = 0.25   # a source whose turn comes after the deadline still gets a cache hit
 _TIMED_OUT = object()
+# A page with a timed-out section is recomputed after this many seconds, so the
+# UI's "retry" gets the source's late answer from the per-tool cache instead
+# of the same cached gap.
+_TIMED_OUT_RECHECK = 5.0
+_deadline_at: contextvars.ContextVar[float | None] = contextvars.ContextVar("explore_deadline_at", default=None)
+
+
+def _explore_deadline_seconds() -> float:
+    raw = (os.environ.get("EXPLORE_DEADLINE_SEC") or "").strip()
+    try:
+        value = float(raw) if raw else _DEFAULT_DEADLINE
+    except ValueError:
+        value = _DEFAULT_DEADLINE
+    return value if value > 0 else _DEFAULT_DEADLINE
+
+
+def _start_deadline() -> None:
+    """Start the whole-request deadline (once per uncached explore call)."""
+    _deadline_at.set(asyncio.get_running_loop().time() + _explore_deadline_seconds())
+
+
+def _cap_for(tool: str) -> float:
+    cap = min(_SOURCE_TIMEOUTS.get(tool, _TOOL_TIMEOUT), _TOOL_TIMEOUT)
+    deadline = _deadline_at.get()
+    if deadline is not None:
+        cap = min(cap, max(deadline - asyncio.get_running_loop().time(), _MIN_REMAINING))
+    return cap
 
 
 def _consume_exception(task: "asyncio.Future") -> None:
@@ -877,24 +935,152 @@ def _consume_exception(task: "asyncio.Future") -> None:
 
 
 async def _capped(tool: str, query: str, awaitable):
+    cap = _cap_for(tool)
     task = asyncio.ensure_future(awaitable)
     task.add_done_callback(_consume_exception)
     try:
-        return await asyncio.wait_for(asyncio.shield(task), _TOOL_TIMEOUT)
+        return await asyncio.wait_for(asyncio.shield(task), cap)
     except asyncio.TimeoutError:
         if task.done():   # the tool itself raised a timeout; not the cap
             raise
         logger.warning(
-            "explore: tool %s exceeded %.0fs for query=%r; returning an empty section "
-            "(the fetch keeps running and will fill the cache)", tool, _TOOL_TIMEOUT, query,
+            "explore: tool %s exceeded %.1fs for query=%r; marking it timed out "
+            "(the fetch keeps running and will fill the cache)", tool, cap, query,
         )
         return _TIMED_OUT
+
+
+# ── Papers: abstract excerpts and the "Most relevant" order ───────────────────
+
+
+async def _papers_with_abstracts(queries: list[str], since_year: int | None) -> tuple[list[dict], list[dict]]:
+    """(latest, key) as dicts, each paper with a verbatim `abstract` excerpt
+    when one is available (see tools/abstracts.attach_abstract_excerpts)."""
+    latest, key = await search_papers_multi_dual_async(
+        queries, limit_per_query=_NET_LIMIT, final_limit=_NET_LIMIT, since_year=since_year,
+    )
+    latest_d = [i.model_dump() for i in latest]
+    key_d = [i.model_dump() for i in key]
+    await attach_abstract_excerpts(latest_d, key_d)
+    return latest_d, key_d
+
+
+# Words that say nothing about WHICH papers fit ("latest papers on KRAS").
+_RELEVANCE_STOPWORDS = {
+    "a", "an", "and", "the", "of", "in", "on", "for", "to", "with", "by", "from", "at", "as",
+    "or", "is", "are", "what", "which", "how", "about", "into", "via", "vs", "versus",
+    "paper", "papers", "study", "studies", "research", "article", "articles", "review",
+    "reviews", "latest", "newest", "recent", "new", "find", "show", "me", "any", "all",
+}
+_WORD = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+
+
+def _relevance_terms(text: str) -> list[str]:
+    out: list[str] = []
+    for w in _WORD.findall((text or "").lower()):
+        if (len(w) > 1 or w.isdigit()) and w not in _RELEVANCE_STOPWORDS and w not in out:
+            out.append(w)
+    return out
+
+
+def _relevance_order(items: list[dict], key_order: list[dict], text: str) -> list[dict]:
+    """The same papers ordered by how many of the typed search's words appear in
+    the title (counted twice) and abstract. Ties keep the Key-papers (WINNER)
+    order, then the given order. Nothing is dropped: there is no floor."""
+    terms = _relevance_terms(text)
+    rank = {i.get("id"): n for n, i in enumerate(key_order)}
+
+    def score(item: dict) -> int:
+        title = set(_WORD.findall((item.get("title") or "").lower()))
+        raw = item.get("raw") if isinstance(item.get("raw"), dict) else {}
+        body = " ".join(str(x) for x in (raw.get("abstract"), item.get("abstract")) if x)
+        body_words = set(_WORD.findall(body.lower()))
+        return sum(2 if t in title else 1 if t in body_words else 0 for t in terms)
+
+    indexed = list(enumerate(items))
+    indexed.sort(key=lambda p: (-score(p[1]), rank.get(p[1].get("id"), len(rank)), p[0]))
+    return [i for _, i in indexed]
+
+
+# ── FDA approvals: which lookup, if any ───────────────────────────────────────
+
+_FDA_NOTE = {
+    "text": "FDA data can lag recent approvals by days to weeks. Check Drugs@FDA for the latest.",
+    "url": "https://www.accessdata.fda.gov/scripts/cder/daf/",
+}
+
+
+def _distinctive_tokens(text: str) -> list[str]:
+    """Variant-like tokens the user typed ("G12C", "V600E"). They boost an
+    approval whose indication names them; they never filter one out."""
+    out: list[str] = []
+    for w in (text or "").split():
+        token = w.strip(",;:.?!()").upper()
+        if query_intent._VARIANT.match(token) and token not in out:
+            out.append(token)
+    return out
+
+
+def _fda_plan(scope: dict) -> tuple[str, str] | None:
+    """(mode, query) for the approvals lookup — one openFDA label search:
+      * a drug in scope   -> ("drug", name): label generic/brand name;
+      * a disease         -> ("indication", disease);
+      * a gene with a typed variant ("KRAS G12C") -> ("indication", that phrase),
+        since labels name the variant in the indication;
+      * a pure gene/target query (no disease, drug or variant) -> None: label
+        indications name diseases, not targets, so the search would only
+        return drugs that mention the gene in passing."""
+    assets = [a.strip() for a in (scope.get("assets") or []) if a and a.strip()]
+    if assets:
+        return "drug", assets[0]
+    query = _query_for("search_fda", scope)
+    if query:
+        return "indication", query
+    variants = query_intent.parse(scope.get("_raw_input") or "").variants
+    for gene in scope.get("genes") or []:
+        if gene in variants:
+            return "indication", variants[gene]
+    return None
+
+
+async def _fda_task(query: str, mode: str, boost: list[str]):
+    items = await search_fda_async(query, _NET_LIMIT, by=mode)
+    return boost_distinctive(items, boost)
+
+
+# ── Tool searches: GEO datasets only when the question is about data ──────────
+
+_TOOL_WORDS = re.compile(
+    r"\b(?:tools?|software|packages?|librar(?:y|ies)|pipelines?|frameworks?|web\s*servers?|"
+    r"servers?|open[-\s]?source|github|repos?|repositories|programs?|algorithms?)\b",
+    re.I,
+)
+_DATA_WORDS = re.compile(
+    r"\b(?:data|datasets?|data\s*sets?|expression|transcriptom\w*|rna[-\s]?seq|scrna[-\s]?seq|"
+    r"single[-\s]cell|microarrays?|geo|gse\d*|omics|genomics|proteom\w*|sequencing|atlas|cohorts?|samples?)\b",
+    re.I,
+)
+
+
+def _is_tool_query_without_data(text: str, scope: dict) -> bool:
+    """A question about software ("open-source tools for molecular docking",
+    or a method with no gene or disease) that says nothing about data: GEO
+    expression series are noise for it."""
+    text = text or ""
+    if _DATA_WORDS.search(text):
+        return False
+    if _TOOL_WORDS.search(text):
+        return True
+    return bool(scope.get("methods")) and not scope.get("genes") and not scope.get("diseases")
 
 
 async def _execute(
     chosen: list[str], scope: dict, since_year: int | None = None,
     status_filter: list[str] | None = None, papers_include_methods: bool = False,
+    source_filters: dict | None = None,
+    query_overrides: dict[str, str] | None = None,
 ) -> list[dict]:
+    overrides = query_overrides or {}
     tasks = []
     specs: list[tuple[str, str, str]] = []  # (tool, kind, display_query)
     papers_query_display: str | None = None
@@ -913,18 +1099,21 @@ async def _execute(
                 # topics for this call only.
                 extra = list(scope.get("methods") or []) + list(scope.get("assets") or [])
                 papers_scope = {**scope, "topics": list(scope.get("topics") or []) + extra}
-            queries = _entity_queries_for_papers(papers_scope)
+            queries = [overrides[name]] if overrides.get(name) else _entity_queries_for_papers(papers_scope)
             papers_query_display = " | ".join(queries)
-            tasks.append(
-                search_papers_multi_dual_async(
-                    queries, limit_per_query=_NET_LIMIT, final_limit=_NET_LIMIT,
-                    since_year=since_year,
-                )
-            )
+            tasks.append(_papers_with_abstracts(queries, since_year))
             specs.append((name, _KINDS[name], papers_query_display))
             continue
-        query = _query_for(name, scope)
-        if name in ("search_preprints", "search_fda") and not query:
+        if name == "search_fda":
+            plan = ("indication", overrides[name]) if overrides.get(name) else _fda_plan(scope)
+            if not plan:
+                continue   # pure gene/target query: no label indication to search
+            mode, query = plan
+            tasks.append(_fda_task(query, mode, _distinctive_tokens(scope.get("_raw_input") or "")))
+            specs.append((name, _KINDS[name], query))
+            continue
+        query = overrides.get(name) or _query_for(name, scope)
+        if name == "search_preprints" and not query:
             continue   # nothing to search on
         if name == "search_opentargets":
             # Thread the disease term through as a SEPARATE parameter
@@ -954,12 +1143,18 @@ async def _execute(
             # a scope disease or gene. No disease/gene (methods fallback) -> no
             # filter, as before.
             mentions = [t.strip() for t in (scope.get("diseases") or []) + (scope.get("genes") or []) if t and t.strip()]
-            tasks.append(search_grants_async(query, _NET_LIMIT, must_mention=mentions or None))
+            tasks.append(search_grants_async(
+                query, _NET_LIMIT, must_mention=mentions or None, **_grant_kwargs(source_filters)
+            ))
         elif name == "search_trials":
             # The query came from the `diseases` slice (the only primary slice)
             # exactly when scope has diseases; otherwise it is the methods
             # fallback, which stays on free-text query.term.
             condition_only = bool(scope.get("diseases"))
+            if overrides.get(name):
+                # An override is a single entity: a disease goes to the
+                # condition field, anything else (a gene, "KRAS G12C") to free text.
+                condition_only = query.lower() in {d.strip().lower() for d in scope.get("diseases") or []}
             genes = [g.strip() for g in (scope.get("genes") or []) if g and g.strip()]
             # status_filter is UI-only (see explore_async's docstring) — never
             # derived from scope/LLM extraction, forwarded verbatim to
@@ -969,14 +1164,15 @@ async def _execute(
                 # condition-only ones (see search_trials_with_gene_async).
                 tasks.append(
                     search_trials_with_gene_async(
-                        query, genes[0], _NET_LIMIT, status_filter=status_filter or None
+                        query, genes[0], _NET_LIMIT, status_filter=status_filter or None,
+                        **_trial_kwargs(source_filters),
                     )
                 )
             else:
                 tasks.append(
                     search_trials_async(
                         query, _NET_LIMIT, status_filter=status_filter or None,
-                        condition_only=condition_only,
+                        condition_only=condition_only, **_trial_kwargs(source_filters),
                     )
                 )
         else:
@@ -1004,11 +1200,13 @@ async def _execute(
                 "explore: tool %s failed for query=%r", tool, query, exc_info=result
             )
         elif result is _TIMED_OUT:
-            # Over the per-tool cap: empty section, page still loads.
+            # Over the per-tool cap: the page still loads, and the section says
+            # it ran out of time (not that it found nothing).
             section["items"] = []
             if tool == "search_papers":
                 section["items_key"] = []
             section["timed_out"] = True
+            section["empty_reason"] = "timed_out"
         elif tool == "search_papers":
             # search_papers_multi_dual_async returns (latest, key) — TWO
             # orderings of the SAME already-ranked pool (see that function's
@@ -1019,10 +1217,15 @@ async def _execute(
             # subsection under the same Papers tab (see CategoryStrip —
             # this is not a new top-level kind/tab).
             latest, key = result
-            section["items"] = [item.model_dump() for item in latest]
-            section["items_key"] = [item.model_dump() for item in key]
+            section["items"] = latest
+            section["items_key"] = key
+            # Typed searches also get a "Most relevant" order of the same papers.
+            if scope.get("_raw_input") and not scope.get("is_default"):
+                section["items_relevant"] = _relevance_order(latest, key, scope["_raw_input"])
         else:
             section["items"] = [item.model_dump() for item in result]
+        if kind == "approval":
+            section["note"] = dict(_FDA_NOTE)
         sections.append(section)
 
     # A preprint with the same DOI as a returned paper is the same work: show
@@ -1042,6 +1245,84 @@ async def _execute(
 
 _TOOL_FOR_KIND: dict[str, str] = {kind: tool for tool, kind in _KINDS.items()}
 
+# Sources the popular-topic prewarm fills (prewarm.py). External, cached
+# sources only; GitHub is left out for its 30-a-minute search budget.
+_PREWARM_TOOLS = {
+    "search_papers", "search_preprints", "search_trials", "search_fda", "search_grants",
+    "search_datasets", "search_pager", "search_chembl", "search_opentargets",
+}
+
+
+async def prewarm_topic(text: str) -> list[str]:
+    """Fill the per-source caches for `text` with NO LLM call: the scope comes
+    from the deterministic parser and the sources from the heuristic router.
+    Returns the tools run."""
+    intent = query_intent.parse(text)
+    scope = query_intent.refine_scope({}, intent)
+    tools = [t for t in _heuristic_tools(scope) if t in _PREWARM_TOOLS]
+    if tools:
+        _start_deadline()
+        await _execute(tools, {**scope, "_raw_input": intent.core or intent.text})
+    return tools
+
+
+_GRANT_SORTS = {"deadline"}
+
+
+def normalize_source_filters(raw) -> dict:
+    """Caller-supplied per-source filters -> a small dict with only the keys
+    that are set. All optional, all UI-only (never derived from free text):
+      grant_open_only: bool        posted grants only (no forecasts)
+      grant_agencies:  [str]       Grants.gov agency codes/aliases ("NIH", "NSF", "HHS-NIH11")
+      grant_sort:      "deadline"  soonest close date first
+      trial_location:  str         ClinicalTrials.gov query.locn (e.g. "Alabama")
+    Anything malformed is dropped, so a bad value can never change results."""
+    if not isinstance(raw, dict):
+        return {}
+    out: dict = {}
+    if raw.get("grant_open_only") is True:
+        out["grant_open_only"] = True
+    agencies = raw.get("grant_agencies")
+    if isinstance(agencies, str):
+        agencies = [agencies]
+    if isinstance(agencies, (list, tuple)):
+        cleaned = sorted({str(a).strip().upper() for a in agencies if str(a).strip()})[:10]
+        if cleaned:
+            out["grant_agencies"] = cleaned
+    if raw.get("grant_sort") in _GRANT_SORTS:
+        out["grant_sort"] = raw["grant_sort"]
+    location = raw.get("trial_location")
+    if isinstance(location, str) and location.strip():
+        out["trial_location"] = " ".join(location.split())[:100]
+    return out
+
+
+def _filters_key(filters: dict | None) -> str:
+    if not filters:
+        return ""
+    parts = [
+        f"{k}={','.join(v) if isinstance(v, list) else str(v).lower()}"
+        for k, v in sorted(filters.items())
+    ]
+    return ":f[" + ";".join(parts) + "]"
+
+
+def _grant_kwargs(filters: dict | None) -> dict:
+    filters = filters or {}
+    kw: dict = {}
+    if filters.get("grant_open_only"):
+        kw["open_only"] = True
+    if filters.get("grant_agencies"):
+        kw["agencies"] = filters["grant_agencies"]
+    if filters.get("grant_sort"):
+        kw["sort"] = filters["grant_sort"]
+    return kw
+
+
+def _trial_kwargs(filters: dict | None) -> dict:
+    location = (filters or {}).get("trial_location")
+    return {"location": location} if location else {}
+
 
 def normalize_only_kinds(raw) -> list[str]:
     """Caller-supplied `only_kinds` -> a sorted, de-duplicated list of KNOWN kinds
@@ -1052,83 +1333,230 @@ def normalize_only_kinds(raw) -> list[str]:
     return sorted({str(k).strip() for k in raw if str(k).strip() in _TOOL_FOR_KIND})
 
 
-async def _execute_only(
-    kinds: list[str], text: str, since_year: int | None = None,
-    status_filter: list[str] | None = None,
-) -> list[dict]:
-    """Run ONLY the sources for `kinds`, each with the typed text as its query.
+# The LLM scope call on the only_kinds path: shared cache entry with the routed
+# path (same "scope" key, so one question never pays for two extractions),
+# bounded by a short timeout, and switchable off. On timeout, error or "0" the
+# deterministic parse (tools/query_intent.py) is used instead.
+_ONLY_SCOPE_TIMEOUT = 3.0
 
-    No scope extraction and no routing: a user who picked "Grants" asked for
-    grants, so the LLM router never gets to leave that source out. Sections have
-    the same shape _execute builds."""
-    tools = [_TOOL_FOR_KIND[k] for k in kinds]
-    awaitables = []
-    for name in tools:
-        if name == "search_papers":
-            awaitables.append(
-                search_papers_multi_dual_async(
-                    [text], limit_per_query=_NET_LIMIT, final_limit=_NET_LIMIT,
-                    since_year=since_year,
-                )
-            )
-        elif name == "search_news":
-            awaitables.append(search_news_async(text, _NET_LIMIT, match=True))
-        elif name == "search_trials":
-            awaitables.append(
-                search_trials_async(
-                    text, _NET_LIMIT, status_filter=status_filter or None, condition_only=False,
-                )
-            )
-        else:
-            awaitables.append(_dispatch(name, text))
+# Sections the relevance gate applies to. Papers and preprints stay out: their
+# abstracts use synonyms the seed table does not know, and gating them would
+# drop good results.
+_GATED_KINDS = {"trial", "target", "news", "geneset"}
 
-    results = await asyncio.gather(
-        *(_capped(name, text, a) for name, a in zip(tools, awaitables)),
-        return_exceptions=True,
+
+def _only_scope_llm_enabled() -> bool:
+    return os.environ.get("EXPLORE_ONLY_SCOPE_LLM", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+async def _scope_for_only(input_text: str, intent: query_intent.Intent) -> tuple[dict, str]:
+    """(scope, "llm" | "deterministic") for the only_kinds path."""
+    if not _only_scope_llm_enabled():
+        return query_intent.refine_scope({}, intent), "deterministic"
+    task = asyncio.ensure_future(
+        cache.get_or_compute(
+            normalize_key("scope", input_text),
+            lambda: asyncio.to_thread(_extract_scope, input_text),
+            TTL_LLM, STALE_LLM,
+        )
     )
-    sections: list[dict] = []
-    for name, result in zip(tools, results):
-        section: dict = {"tool": name, "kind": _KINDS[name], "query": text}
-        if isinstance(result, Exception):
-            section["items"] = []
-            if name == "search_papers":
-                section["items_key"] = []
-            section["error"] = f"{type(result).__name__}: {result}"
-            logger.exception("explore(only): tool %s failed for query=%r", name, text, exc_info=result)
-        elif result is _TIMED_OUT:
-            section["items"] = []
-            if name == "search_papers":
-                section["items_key"] = []
-            section["timed_out"] = True
-        elif name == "search_papers":
-            latest, key = result
-            section["items"] = [item.model_dump() for item in latest]
-            section["items_key"] = [item.model_dump() for item in key]
-        else:
-            section["items"] = [item.model_dump() for item in result]
-        sections.append(section)
-    return sections
+    task.add_done_callback(_consume_exception)
+    try:
+        # Shielded: a slow extraction keeps running and fills the cache for
+        # the next search instead of being thrown away.
+        llm_scope = await asyncio.wait_for(asyncio.shield(task), _ONLY_SCOPE_TIMEOUT)
+    except asyncio.TimeoutError:
+        logger.warning("explore(only): scope extraction exceeded %.0fs for input=%r; using deterministic parse",
+                       _ONLY_SCOPE_TIMEOUT, input_text)
+        return query_intent.refine_scope({}, intent), "deterministic"
+    except Exception:
+        logger.exception("explore(only): scope extraction failed for input=%r; using deterministic parse", input_text)
+        return query_intent.refine_scope({}, intent), "deterministic"
+    if not isinstance(llm_scope, dict) or query_intent.is_raw_echo(llm_scope, intent.text):
+        return query_intent.refine_scope({}, intent), "deterministic"
+    return query_intent.refine_scope(llm_scope, intent), "llm"
+
+
+def _gate_section(section: dict, groups: list[list[str]]) -> None:
+    if section["kind"] not in _GATED_KINDS or not groups or not section.get("items"):
+        return
+    kept = [i for i in section["items"] if query_intent.mentions_any(i, groups)]
+    dropped = len(section["items"]) - len(kept)
+    if dropped:
+        section["items"] = kept
+        section["filtered_out"] = section.get("filtered_out", 0) + dropped
+
+
+def _empty_reason(section: dict) -> str:
+    if section.get("error"):
+        return "source_error"
+    if section.get("timed_out"):
+        return "timed_out"
+    if not section.get("query"):
+        return "no_query"
+    if section.get("filtered_out"):
+        return "off_topic_filtered"
+    return "no_results"
+
+
+async def _execute_only(
+    kinds: list[str], scope: dict, intent: query_intent.Intent, since_year: int | None = None,
+    status_filter: list[str] | None = None, source_filters: dict | None = None,
+) -> tuple[list[dict], str | None]:
+    """Run ONLY the sources for `kinds` (the router never gets to leave one
+    out), each with its usual scope-built query (_query_for / the papers entity
+    fan-out), then:
+      * drop trial/target/news/gene-set items that name none of the entities;
+      * retry each still-empty section ONCE with the shortest entity query
+        ("KRAS G12C"), never with more sources than the first pass;
+      * give every still-empty section an `empty_reason`.
+    Returns (sections, the fallback query if any section used it)."""
+    tools = [_TOOL_FOR_KIND[k] for k in kinds]
+    entity = query_intent.shortest_entity(scope, intent)
+    overrides: dict[str, str] = {}
+    for name in tools:
+        # A chosen source with nothing in its usual slice (preprints with no
+        # disease or gene named, say) searches the entity instead of being
+        # skipped. Approvals are not overridden: _fda_plan decides, and a pure
+        # gene/target question runs no label search at all.
+        if name == "search_preprints" and not _query_for(name, scope) and entity:
+            overrides[name] = entity
+
+    exec_scope = {**scope, "_raw_input": intent.core or intent.text}
+    skipped_datasets = "search_datasets" in tools and _is_tool_query_without_data(intent.text, scope)
+    run_tools = [t for t in tools if not (skipped_datasets and t == "search_datasets")]
+    fextra = {"source_filters": source_filters} if source_filters else {}
+    sections = await _execute(run_tools, exec_scope, since_year, status_filter, query_overrides=overrides, **fextra)
+    by_tool = {s["tool"]: s for s in sections}
+    if skipped_datasets:
+        by_tool["search_datasets"] = {
+            "tool": "search_datasets", "kind": "dataset", "query": "", "items": [],
+            "empty_reason": "tool_query",
+        }
+    groups = query_intent.gate_terms(scope, intent)
+    for s in sections:
+        _gate_section(s, groups)
+
+    # Approvals are never retried: one openFDA lookup per question.
+    retry = [
+        s["tool"] for s in sections
+        if not s.get("items") and not s.get("error") and not s.get("timed_out")
+        and s["tool"] != "search_fda"
+        and entity and entity.lower() != (s.get("query") or "").lower()
+    ]
+    used_fallback = None
+    if retry:
+        second = await _execute(retry, exec_scope, since_year, status_filter,
+                                query_overrides={name: entity for name in retry}, **fextra)
+        for s in second:
+            _gate_section(s, groups)
+            first = by_tool[s["tool"]]
+            first["fallback_query"] = entity
+            if s.get("items"):
+                used_fallback = entity
+                first["items"] = s["items"]
+                for extra in ("items_key", "items_relevant"):
+                    if extra in s:
+                        first[extra] = s[extra]
+                first["filtered_out"] = s.get("filtered_out", 0)
+            elif s.get("filtered_out"):
+                first["filtered_out"] = first.get("filtered_out", 0) + s["filtered_out"]
+
+    out: list[dict] = []
+    for name in tools:
+        s = by_tool.get(name) or {"tool": name, "kind": _KINDS[name], "query": "", "items": []}
+        if name == "search_fda" and "note" not in s:
+            s["note"] = dict(_FDA_NOTE)
+        if not s.get("items") and not s.get("empty_reason"):
+            s["empty_reason"] = _empty_reason(s)
+        if not s.get("filtered_out"):
+            s.pop("filtered_out", None)
+        out.append(s)
+    return out, used_fallback
+
+
+def _interpreted(
+    scope: dict, intent: query_intent.Intent, kinds: list[str], scope_source: str,
+    applied_status: list[str] | None, status_from_text: bool,
+    applied_since: int | None, since_from_text: bool, fallback: str | None,
+) -> dict:
+    """What the question was read as, for a "Searched: KRAS G12C · Recruiting"
+    label. Lists only filters that were applied, and says what was not."""
+    ents = query_intent.entities(scope, intent)
+    filters: list[dict] = []
+    if applied_status and "trial" in kinds:
+        filters.append({
+            "key": "status", "value": list(applied_status),
+            "label": intent.status_label if status_from_text and intent.status_label else "Status filter",
+            "from_text": status_from_text,
+        })
+    if applied_since is not None and ("paper" in kinds):
+        filters.append({
+            "key": "since_year", "value": applied_since,
+            "label": f"Newest (since {applied_since})" if since_from_text else f"Since {applied_since}",
+            "from_text": since_from_text,
+        })
+    if intent.approved and "approval" in kinds:
+        filters.append({"key": "approved", "value": True, "label": "Approved", "from_text": True})
+    not_applied: list[str] = []
+    if intent.location:
+        not_applied.append(f"location: {intent.location}")
+    if intent.status_filter and "trial" not in kinds:
+        not_applied.append(f"status: {intent.status_label}")
+    if intent.approved and "approval" not in kinds:
+        not_applied.append("approved")
+    label = " · ".join([", ".join(ents)] + [f["label"] for f in filters]) if ents else \
+        " · ".join(f["label"] for f in filters)
+    return {
+        "entities": ents,
+        "filters": filters,
+        "not_applied": not_applied,
+        "label": label,
+        "scope_source": scope_source,
+        "showing_results_for": fallback,
+    }
 
 
 async def _explore_only_uncached(
     input_text: str, kinds: list[str], since_year: int | None, status_filter: list[str] | None,
+    source_filters: dict | None = None,
 ) -> dict:
+    _start_deadline()
     text = input_text.strip()
-    sections = await _execute_only(kinds, text, since_year, status_filter)
+    intent = query_intent.parse(text)
+    scope, scope_source = await _scope_for_only(input_text, intent)
+
+    # Caller-supplied filters (the UI's controls) always win over words in the text.
+    status_from_text = not status_filter and bool(intent.status_filter)
+    applied_status = status_filter or (intent.status_filter if "trial" in kinds else None) or None
+    since_from_text = since_year is None and intent.recency
+    applied_since = since_year if since_year is not None else (
+        datetime.date.today().year - 1 if intent.recency else None
+    )
+
+    extra = {"source_filters": source_filters} if source_filters else {}
+    sections, fallback = await _execute_only(kinds, scope, intent, applied_since, applied_status, **extra)
+    if intent.approved:
+        sections.sort(key=lambda s: s["kind"] != "approval")
     return {
         "input": input_text,
-        "scope": {**_EMPTY_SCOPE, "topics": [text], "is_default": False, "is_personalized": False},
+        "scope": {**scope, "is_default": False, "is_personalized": False},
         "tools_called": [_TOOL_FOR_KIND[k] for k in kinds],
         "reasoning": f"restricted to {', '.join(kinds)} by the caller; no routing",
+        "interpreted": _interpreted(
+            scope, intent, kinds, scope_source, applied_status, status_from_text,
+            applied_since, since_from_text, fallback,
+        ),
         "sections": sections,
     }
 
 
 async def _explore_uncached(
     input_text: str, scope_terms: list[str] | None = None, since_year: int | None = None,
-    status_filter: list[str] | None = None,
+    status_filter: list[str] | None = None, source_filters: dict | None = None,
 ) -> dict:
     """The real orchestration: extract scope, route, fan out, assemble."""
+    _start_deadline()
     if not (input_text or "").strip():
         chosen = list(_DEFAULT_TOOLS)
         if scope_terms:
@@ -1173,13 +1601,19 @@ async def _explore_uncached(
         chosen.append("search_preprints")
     # FDA approvals ride along with any disease in a typed search (a router that
     # skipped it would hide approved drugs for a named disease).
+    # A named drug gets the drug-name lookup the same way.
     if (
         (input_text or "").strip()
-        and scope.get("diseases")
+        and (scope.get("diseases") or scope.get("assets"))
         and "search_fda" not in chosen
-        and _query_for("search_fda", scope)
+        and _fda_plan(scope)
     ):
         chosen.append("search_fda")
+    # GEO expression series are noise for a question about software, unless it
+    # also asks about data.
+    if (input_text or "").strip() and "search_datasets" in chosen \
+            and _is_tool_query_without_data(input_text, scope):
+        chosen.remove("search_datasets")
     # Same for news: always look, it's a cheap filter over cached RSS feeds and
     # returns nothing (section hidden) when no headline matches.
     if (input_text or "").strip() and "search_news" not in chosen:
@@ -1188,6 +1622,8 @@ async def _explore_uncached(
     # Extra kwarg only when papers were forced in, so the normal call shape is
     # unchanged for every other caller/test double of _execute.
     extra = {"papers_include_methods": True} if forced_papers else {}
+    if source_filters:
+        extra["source_filters"] = source_filters
     exec_scope = {**scope, "_raw_input": input_text} if (input_text or "").strip() else scope
     sections = await _execute(chosen, exec_scope, since_year, status_filter, **extra)
     return {
@@ -1199,16 +1635,27 @@ async def _explore_uncached(
     }
 
 
+def _has_failed_section(result: dict) -> bool:
+    """A section that timed out or whose source raised: don't pin the whole
+    response for the full TTL (an empty preprint section stuck for an hour was
+    issue #66)."""
+    return any(s.get("timed_out") or s.get("error") for s in result.get("sections", []))
+
+
 async def explore_async(
     input_text: str, scope_terms: list[str] | None = None, since_year: int | None = None,
     status_filter: list[str] | None = None, only_kinds: list[str] | None = None,
+    source_filters: dict | None = None,
 ) -> dict:
     """Async orchestration core (used by the MCP server), cached end-to-end.
 
-    `only_kinds` (e.g. ["grant"]) runs JUST those sources with the typed text as
-    the query, skipping scope extraction and the router (see _execute_only). It
-    applies to typed searches only (blank input still serves the landing feed),
-    unknown kinds are dropped, and omitting it leaves everything below unchanged.
+    `only_kinds` (e.g. ["grant"]) runs JUST those sources, skipping the router
+    (see _execute_only). The question is read by the deterministic parser
+    (tools/query_intent.py) plus the shared, cached scope extraction (3 s cap,
+    see _scope_for_only), each source gets its usual scope-built query, and the
+    response adds `interpreted` and per-section `empty_reason`. It applies to
+    typed searches only (blank input still serves the landing feed), unknown
+    kinds are dropped, and omitting it leaves everything below unchanged.
     Cached under its own key per kind set.
 
     `since_year`, when given, restricts search_papers (PubMed/OpenAlex/Crossref
@@ -1230,7 +1677,16 @@ async def explore_async(
     small fixed status vocabulary isn't parsed from text here for the same
     reason the date filter stayed UI-only: keeping the LLM out of a filter path
     that changes which real-world results are shown is worth a control click.
-    Folded into the cache key below, same as since_year.
+    Folded into the cache key below, same as since_year. (Exception: the
+    `only_kinds` path reads a closed word list — "recruiting", "active",
+    "completed", "newest" — deterministically, never via the LLM, applies it
+    only when the caller sent no filter of its own, and reports it in
+    `interpreted.filters` so the user can see it.)
+
+    `source_filters` (see normalize_source_filters): optional per-source
+    filters for grants (open only, agency, deadline sort) and trials (site
+    location). UI-only like status_filter, folded into the cache key, and
+    omitted entirely when empty so the unfiltered path is unchanged.
 
     Blank / whitespace-only input skips LLM extraction and routing entirely and
     serves the landing feed: a fixed tool set, with scope.is_default=true so the
@@ -1260,6 +1716,9 @@ async def explore_async(
     """
     blank = not (input_text or "").strip()
     terms = _clean_terms(scope_terms) if blank else []
+    source_filters = {} if blank else normalize_source_filters(source_filters)
+    fkey = _filters_key(source_filters)
+    fextra = {"source_filters": source_filters} if source_filters else {}
 
     kinds = [] if blank else normalize_only_kinds(only_kinds)
     if kinds:
@@ -1268,13 +1727,14 @@ async def explore_async(
             only_key += f":since{since_year}"
         if status_filter:
             only_key += f":status{','.join(status_filter)}"
+        only_key += fkey
         only_result = await cache.get_or_compute(
             normalize_key(only_key, input_text),
-            lambda: _explore_only_uncached(input_text, kinds, since_year, status_filter),
+            lambda: _explore_only_uncached(input_text, kinds, since_year, status_filter, **fextra),
             TTL_TOPIC, STALE_TOPIC,
         )
-        if any(s.get("timed_out") for s in only_result.get("sections", [])):
-            await cache.expire_soon(normalize_key(only_key, input_text))
+        if _has_failed_section(only_result):
+            await cache.expire_soon(normalize_key(only_key, input_text), _TIMED_OUT_RECHECK)
         return only_result
 
     base_key = "explore:interests" if terms else "explore"
@@ -1283,19 +1743,20 @@ async def explore_async(
         base_key += f":since{since_year}"
     if status_filter:
         base_key += f":status{','.join(status_filter)}"
+    base_key += fkey
     key = normalize_key(base_key, key_terms)
     ttl, stale = (
         (TTL_DEFAULT_FEED, STALE_DEFAULT_FEED) if blank else (TTL_TOPIC, STALE_TOPIC)
     )
     result = await cache.get_or_compute(
         key,
-        lambda: _explore_uncached(input_text, terms, since_year, status_filter),
+        lambda: _explore_uncached(input_text, terms, since_year, status_filter, **fextra),
         ttl, stale,
     )
-    if any(s.get("timed_out") for s in result.get("sections", [])):
-        # A section timed out: don't pin this page for the full TTL while its
+    if _has_failed_section(result):
+        # A section timed out or failed: don't pin this page for the full TTL while its
         # fetch finishes in the background (see _capped).
-        await cache.expire_soon(key)
+        await cache.expire_soon(key, _TIMED_OUT_RECHECK)
     return result
 
 

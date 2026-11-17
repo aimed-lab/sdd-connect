@@ -13,6 +13,8 @@ import os
 import sys
 from urllib.parse import unquote
 
+import httpx
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import Item  # noqa: E402
@@ -135,3 +137,93 @@ if __name__ == "__main__":
             failures += 1; print(f"FAIL  {fn.__name__}: {type(exc).__name__}: {exc}")
     print(f"\n{len(fns) - failures}/{len(fns)} passed")
     sys.exit(1 if failures else 0)
+
+
+# ── #66: 'KRAS G12C' returned 0 preprints ────────────────────────────────────
+
+import pytest  # noqa: E402
+
+import tools.explore as te  # noqa: E402
+import tools.search_preprints as sp  # noqa: E402
+from cache import cache, normalize_key  # noqa: E402
+from sources.europepmc import relaxed_query  # noqa: E402
+
+
+class _SequenceClient:
+    """Answers each GET with the next payload in turn."""
+
+    def __init__(self, *payloads):
+        self._payloads = list(payloads)
+        self.urls: list[str] = []
+
+    async def get(self, url, timeout=None, headers=None):
+        self.urls.append(url)
+        return _FakeResponse(self._payloads.pop(0))
+
+
+_KRAS_HIT = {"hitCount": 150, "resultList": {"result": [{
+    "id": "PPR1332966", "title": "KRAS <sup>G12C</sup> Inhibition Remodels the NSCLC Microenvironment",
+    "authorString": "Doe A", "firstPublicationDate": "2026-10-02",
+    "doi": "10.64898/2026.10.01.756013", "bookOrReportDetails": {"publisher": "bioRxiv"},
+}]}}
+_NO_HITS = {"hitCount": 0, "resultList": {"result": []}}
+
+
+def test_relaxed_query_drops_quotes_and_ands_the_words():
+    assert relaxed_query('"KRAS G12C"') == "KRAS AND G12C"
+    assert relaxed_query('"KRAS G12C" AND "lung cancer"') == "KRAS AND G12C AND lung AND cancer"
+    assert relaxed_query("sotorasib") == "sotorasib"
+
+
+def test_phrase_with_no_hits_is_retried_once_relaxed():
+    c = _SequenceClient(_NO_HITS, _KRAS_HIT)
+    items = asyncio.run(fetch_preprints(c, '"KRAS G12C"', 10))
+    assert [it.id for it in items] == ["europepmc:PPR1332966"]
+    assert len(c.urls) == 2
+    assert "query=KRAS%20AND%20G12C%20AND%20SRC:PPR" in c.urls[1]
+
+
+def test_hits_on_the_first_query_make_no_second_call():
+    c = _SequenceClient(_KRAS_HIT)
+    assert len(asyncio.run(fetch_preprints(c, "KRAS G12C", 10))) == 1
+    assert len(c.urls) == 1
+
+
+def test_single_word_with_no_hits_is_not_retried():
+    c = _SequenceClient(_NO_HITS)
+    assert asyncio.run(fetch_preprints(c, "sotorasib", 10)) == []
+    assert len(c.urls) == 1
+
+
+def test_upstream_failure_is_retried_then_raised_and_not_cached_as_empty(monkeypatch):
+    attempts = []
+
+    async def flaky(client, term, cap):
+        attempts.append(term)
+        raise httpx.ReadTimeout("slow")
+
+    monkeypatch.setattr(sp, "fetch_preprints", flaky)
+    with pytest.raises(httpx.ReadTimeout):
+        asyncio.run(sp.search_preprints_async("KRAS G12C", 10))
+    assert attempts == ["KRAS G12C", "KRAS G12C"]
+    assert asyncio.run(cache._load(normalize_key("preprints:10", "KRAS G12C"))) is None
+
+
+def test_explore_does_not_pin_a_failed_preprint_section(monkeypatch):
+    calls = []
+
+    async def fake(query, limit=20):
+        calls.append(query)
+        if len(calls) == 1:
+            raise httpx.ReadTimeout("slow")
+        return [Item(id="europepmc:PPR1", kind="preprint", title="KRAS G12C preprint", summary="bioRxiv",
+                     url="https://doi.org/10.1/x", doi=None, source="europepmc", date_iso=None,
+                     signal=None, dedupe_key="k")]
+
+    monkeypatch.setattr(te, "search_preprints_async", fake)
+    first = asyncio.run(te.explore_async("KRAS G12C", only_kinds=["preprint"]))
+    assert first["sections"][0]["items"] == [] and "error" in first["sections"][0]
+
+    key = normalize_key("explore:only:preprint", "KRAS G12C")
+    entry = asyncio.run(cache._load(key))
+    assert entry.ttl <= 45 and entry.stale_ttl <= 45      # expire_soon, not the 1 h topic TTL

@@ -5,6 +5,7 @@
 // icon on hover (always visible on phones). Thin dividers between rows.
 
 import SaveButton from "@/components/explore/SaveButton";
+import { cleanText } from "@/lib/sanitizeText";
 import { sourceAnchor } from "@/lib/server/pages/pageViewHelpers";
 import { paperMeta, preprintMeta } from "@/lib/typeStyles";
 import type { ExploreItem } from "@/types/explore";
@@ -45,9 +46,14 @@ export default function PaperList({
           const body = (
             <>
               <h3 className="font-title text-[18px] leading-snug font-medium text-on-background">
-                {item.title}
+                {cleanText(item.title)}
               </h3>
               {authors && <p className="mt-1 text-sm text-secondary truncate">{authors}</p>}
+              {item.abstract && (
+                <p className="mt-1.5 text-[13px] leading-snug text-on-background/70 line-clamp-2">
+                  {item.abstract}
+                </p>
+              )}
             </>
           );
           return (

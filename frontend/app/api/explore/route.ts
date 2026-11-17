@@ -3,6 +3,16 @@ import { getCurrentUserInterests } from "@/lib/server/interests";
 import { getProject } from "@/lib/server/projects";
 import { buildProjectExploreQuery } from "@/lib/projectTypes";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
+import { cleanSectionTitles } from "@/lib/server/explore/exploreLayout";
+import { clientIp, createRateLimiter } from "@/lib/server/rateLimit";
+import {
+  EXPLORE_BODY_MAX_CHARS,
+  EXPLORE_MAX_PER_WINDOW,
+  RATE_LIMITED_MESSAGE,
+  SEARCH_WINDOW_MS,
+  parseExploreBody,
+  retryAfterHeaders,
+} from "@/lib/server/searchRequest";
 
 // Proxy for the Python explore backend. POST { input } -> the backend's
 // { input, scope, tools_called, reasoning, sections } JSON. The backend exposes
@@ -42,36 +52,48 @@ import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBack
 //
 // Resilience contract: this route NEVER 500s the page. On any failure it returns
 // { sections: [], scope: {}, error: true } with HTTP 200 so the UI can render a
-// clean empty state instead of crashing.
+// clean empty state instead of crashing. Out-of-bounds input gets a 400 and too
+// many requests from one IP a 429 (with Retry-After); both carry a `message`
+// the UI shows instead of an empty state.
+
+const limiter = createRateLimiter(SEARCH_WINDOW_MS, EXPLORE_MAX_PER_WINDOW);
+
+// TIME BUDGET. The backend stops waiting for slow sources at its own deadline
+// (EXPLORE_DEADLINE_SEC, 25 s by default — see backend/explore-mcp/tools/
+// explore.py) and marks them `timed_out`, so the page gets the other results
+// plus a "didn't respond in time — retry" state. This route allows 60 s and
+// gives up on the backend after 55 s, so even a stalled backend ends in the
+// error shape below rather than a platform timeout.
+export const maxDuration = 60;
+const BACKEND_TIMEOUT_MS = 55_000;
 
 export async function POST(req: Request) {
-  let input = "";
-  let personalize = true;
-  let projectId: string | undefined;
-  let sinceYear: number | undefined;
-  let statusFilter: string[] | undefined;
-  let onlyKinds: string[] | undefined;
-  try {
-    const body = await req.json();
-    if (body && typeof body.input === "string") input = body.input;
-    if (body && body.personalize === false) personalize = false;
-    if (body && typeof body.project_id === "string") projectId = body.project_id;
-    if (body && typeof body.since_year === "number" && Number.isFinite(body.since_year)) {
-      sinceYear = body.since_year;
-    }
-    if (body && Array.isArray(body.status_filter)) {
-      const cleaned = body.status_filter.filter((s: unknown): s is string => typeof s === "string" && s.trim() !== "");
-      if (cleaned.length > 0) statusFilter = cleaned;
-    }
-    // A chosen scope ("Grants"): the backend queries just these sources with the
-    // typed text instead of letting its router decide.
-    if (body && Array.isArray(body.only_kinds)) {
-      const kinds = body.only_kinds.filter((k: unknown): k is string => typeof k === "string" && k.trim() !== "");
-      if (kinds.length > 0) onlyKinds = kinds;
-    }
-  } catch {
-    // malformed body -> treat as empty input (backend serves the default feed)
+  if (limiter.limited(clientIp(req))) {
+    return NextResponse.json(
+      { sections: [], scope: {}, error: true, rate_limited: true, message: RATE_LIMITED_MESSAGE },
+      { status: 429, headers: retryAfterHeaders() }
+    );
   }
+
+  if (Number(req.headers.get("content-length") ?? 0) > EXPLORE_BODY_MAX_CHARS) {
+    return NextResponse.json({ sections: [], scope: {}, error: true, message: "Request is too large." }, { status: 400 });
+  }
+  let raw = "";
+  try {
+    raw = await req.text();
+  } catch {
+    // unreadable body -> treat as empty input (backend serves the default feed)
+  }
+  // A chosen scope (only_kinds, e.g. "Grants"): the backend queries just these
+  // sources with the typed text instead of letting its router decide.
+  const parsed = parseExploreBody(raw);
+  if (!parsed.ok) {
+    return NextResponse.json({ sections: [], scope: {}, error: true, message: parsed.message }, { status: 400 });
+  }
+  let input = parsed.input;
+  const { personalize, projectId, sinceYear, statusFilter, onlyKinds } = parsed;
+  // Optional per-source filters; the backend validates them too.
+  const sourceFilters = parsed.sourceFilters ?? {};
 
   if (projectId) {
     const result = await getProject(projectId);
@@ -100,13 +122,16 @@ export async function POST(req: Request) {
     if (sinceYear !== undefined) payload.since_year = sinceYear;
     if (statusFilter !== undefined) payload.status_filter = statusFilter;
     if (onlyKinds !== undefined && input.trim()) payload.only_kinds = onlyKinds;
+    if (input.trim()) Object.assign(payload, sourceFilters);
     const res = await fetch(`${EXPLORE_API_URL}/api/explore`, {
       method: "POST",
       headers: exploreBackendHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(BACKEND_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`explore backend responded ${res.status}`);
     const data = await res.json();
+    if (data && Array.isArray(data.sections)) data.sections = cleanSectionTitles(data.sections);
     return NextResponse.json(data);
   } catch {
     return NextResponse.json({ sections: [], scope: {}, error: true }, { status: 200 });

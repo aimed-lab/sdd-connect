@@ -25,6 +25,7 @@ from urllib.parse import quote
 
 import httpx
 
+from cache import cache, normalize_key
 from sources.base import _raise_for_status_redacted, get_json
 from sources.openalex import _api_key_param as _openalex_key
 from sources.pubmed import _api_key_param as _ncbi_key
@@ -175,3 +176,78 @@ async def enrich_abstracts(candidates: list[dict]) -> dict:
         stats["errors"].append(f"unexpected: {type(e).__name__}")
     stats["after"] = sum(1 for c in candidates if has_abstract(c))
     return stats
+
+
+# ── Abstract excerpts on Explore paper cards ──────────────────────────────────
+#
+# The papers section shows ~10 papers. OpenAlex works carry their abstract in
+# raw (sources/openalex.py rebuilds it at fetch time, no extra call); PubMed
+# items get theirs from ONE batched efetch for the shown PMIDs, cached by the
+# id set. Best-effort: on any failure or timeout the card keeps its summary.
+
+EXCERPT_CHARS = 320
+CARD_EFETCH_TIMEOUT = 4.0   # seconds; the papers section has its own cap too
+_TTL_ABSTRACTS = 24 * 60 * 60
+_STALE_ABSTRACTS = 48 * 60 * 60
+_EFETCH_MAX_IDS = 40
+
+
+def excerpt(text: str | None, limit: int = EXCERPT_CHARS) -> str | None:
+    """A verbatim lead of `text`: whole sentences up to `limit` characters,
+    else cut at a word boundary with an ellipsis. Never rewords anything."""
+    text = " ".join((text or "").split())
+    if not text:
+        return None
+    if len(text) <= limit:
+        return text
+    head = text[:limit]
+    end = max(head.rfind(". "), head.rfind("? "), head.rfind("! "))
+    if end >= limit // 2:
+        return head[: end + 1]
+    cut = head.rsplit(" ", 1)[0] if " " in head else head
+    return cut.rstrip(",;:") + "…"
+
+
+async def _pubmed_abstracts_uncached(pmids: list[str]) -> dict[str, str]:
+    async with httpx.AsyncClient() as client:
+        return await asyncio.wait_for(_efetch(client, pmids), timeout=CARD_EFETCH_TIMEOUT)
+
+
+async def pubmed_abstracts(pmids: list[str]) -> dict[str, str]:
+    """{pmid: abstract} for up to _EFETCH_MAX_IDS ids, in ONE efetch call,
+    cached by the sorted id set. No retries. Returns {} on any failure."""
+    ids = sorted({p for p in pmids if p and p.isdigit()})[:_EFETCH_MAX_IDS]
+    if not ids:
+        return {}
+    try:
+        return await cache.get_or_compute(
+            normalize_key("abstracts:pubmed", ",".join(ids)),
+            lambda: _pubmed_abstracts_uncached(ids),
+            _TTL_ABSTRACTS, _STALE_ABSTRACTS,
+        )
+    except Exception as e:
+        logger.warning("abstract excerpts: pubmed efetch failed for %d ids: %s", len(ids), e)
+        return {}
+
+
+def _raw_abstract(item: dict) -> str | None:
+    raw = item.get("raw")
+    text = raw.get("abstract") if isinstance(raw, dict) else None
+    return text if isinstance(text, str) and text.strip() else None
+
+
+async def attach_abstract_excerpts(*groups: list[dict]) -> None:
+    """Set item["abstract"] (a verbatim excerpt) on every paper dict in
+    `groups` that has a real abstract. Items without one are left alone, so
+    the card falls back to its summary. Never raises."""
+    try:
+        items = [i for g in groups for i in g if isinstance(i, dict)]
+        need = [p for i in items if not _raw_abstract(i) and (p := _pmid(i))]
+        fetched = await pubmed_abstracts(need) if need else {}
+        for i in items:
+            text = _raw_abstract(i) or fetched.get(_pmid(i) or "")
+            snippet = excerpt(text)
+            if snippet:
+                i["abstract"] = snippet
+    except Exception:
+        logger.exception("abstract excerpts failed")
