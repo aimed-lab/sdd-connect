@@ -147,4 +147,8 @@ export type ExploreResponse = {
   reasoning?: string | null;
   sections: ExploreSection[];
   error?: boolean;
+  /** Set with a 429: the caller sent too many searches in a short time. */
+  rate_limited?: boolean;
+  /** A reason to show instead of the generic error copy (400 / 429). */
+  message?: string;
 };
