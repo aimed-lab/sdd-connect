@@ -209,3 +209,53 @@ async def fetch_trials(
             )
         )
     return filter_quality(items)
+
+
+# Landscape mode (tools/trial_landscape.py): only the fields the grouped table
+# needs, so two pages stay small.
+_LANDSCAPE_FIELDS = (
+    "NCTId,BriefTitle,OverallStatus,Phase,LeadSponsorName,"
+    "InterventionName,InterventionType,StartDate"
+)
+
+
+async def fetch_trial_landscape_page(
+    client: httpx.AsyncClient, term: str, page_size: int, page_token: str | None = None,
+    status_filter: list[str] | None = None, location: str | None = None,
+) -> tuple[list[dict], int | None, str | None]:
+    """One page of a landscape search: (rows, totalCount, nextPageToken).
+    Free-text query.term in the registry's relevance order. totalCount is
+    requested on the first page only (the API returns it there)."""
+    url = (
+        "https://clinicaltrials.gov/api/v2/studies"
+        f"?query.term={quote(term)}&pageSize={page_size}&fields={_LANDSCAPE_FIELDS}"
+    )
+    if page_token:
+        url += f"&pageToken={quote(page_token)}"
+    else:
+        url += "&countTotal=true"
+    if status_filter:
+        url += f"&filter.overallStatus={quote(','.join(status_filter))}"
+    if location and location.strip():
+        url += f"&query.locn={quote(location.strip())}"
+    data = await get_json(client, url) or {}
+
+    rows: list[dict] = []
+    for s in data.get("studies") or []:
+        proto = s.get("protocolSection") or {}
+        ident = proto.get("identificationModule") or {}
+        nct_id = ident.get("nctId") or ""
+        if not nct_id:
+            continue
+        status = proto.get("statusModule") or {}
+        rows.append({
+            "nct_id": nct_id,
+            "title": ident.get("briefTitle") or "",
+            "status": status.get("overallStatus") or None,
+            "phases": (proto.get("designModule") or {}).get("phases") or [],
+            "sponsor": ((proto.get("sponsorCollaboratorsModule") or {}).get("leadSponsor") or {}).get("name"),
+            "start_date": (status.get("startDateStruct") or {}).get("date"),
+            "interventions": _interventions(proto.get("armsInterventionsModule") or {}),
+        })
+    total = data.get("totalCount")
+    return rows, total if isinstance(total, int) else None, data.get("nextPageToken") or None

@@ -148,3 +148,40 @@ export type ExploreResponse = {
   sections: ExploreSection[];
   error?: boolean;
 };
+
+/** POST /api/trial-landscape (#82): one bounded ClinicalTrials.gov search,
+ *  grouped by normalised intervention, then phase and lead sponsor. */
+export type TrialLandscapeTrial = {
+  nct_id: string;
+  url: string;
+  title: string;
+  status: string | null;
+  start_date: string | null;
+};
+
+export type TrialLandscapeRow = {
+  phase: string;
+  sponsor: string;
+  trials: TrialLandscapeTrial[];
+};
+
+export type TrialLandscapeGroup = {
+  asset: string;
+  key: string;
+  aliases: string[];
+  trial_count: number;
+  rows: TrialLandscapeRow[];
+};
+
+export type TrialLandscape = {
+  query: string;
+  /** ClinicalTrials.gov's own count for the search; null when it was not returned. */
+  total: number | null;
+  fetched: number;
+  shown: number;
+  without_asset: number;
+  partial: boolean;
+  exhaustive: false;
+  groups: TrialLandscapeGroup[];
+  error?: string | boolean;
+};

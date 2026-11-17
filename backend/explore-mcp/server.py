@@ -115,6 +115,7 @@ from tools.search_tools import search_tools_async
 from tools.search_trials import search_trials_async
 from tools.search_wiki import get_wiki_page as _get_wiki_page
 from tools.search_wiki import search_wiki as _search_wiki
+from tools.trial_landscape import trial_landscape_async
 
 load_dotenv()
 
@@ -689,6 +690,36 @@ async def explore_http(request):
         logger.exception("POST /api/explore failed: input=%r", input_text)
         return JSONResponse(
             {"input": input_text, "scope": {}, "tools_called": [], "sections": [], "error": str(exc)},
+            status_code=200,
+        )
+
+
+@mcp.custom_route("/api/trial-landscape", methods=["POST"])
+async def trial_landscape_http(request):
+    """Competitive-landscape view of ClinicalTrials.gov for one query (#82).
+
+      POST { "query": "<text>", "status_filter": [<str>...], "trial_location": "<str>" }
+      -> { query, total, fetched, shown, without_asset, partial, exhaustive: false,
+           groups: [{ asset, aliases, trial_count, rows: [{ phase, sponsor, trials }] }] }
+
+    One bounded, cached registry search (see tools/trial_landscape.py): at most
+    2 pages of 25 trials, no per-drug fan-out, no LLM. Never 500s the caller."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    query = body.get("query") if isinstance(body.get("query"), str) else ""
+    status_filter = body.get("status_filter") if isinstance(body.get("status_filter"), list) else None
+    location = body.get("trial_location") if isinstance(body.get("trial_location"), str) else None
+    try:
+        return JSONResponse(await trial_landscape_async(query, status_filter, location))
+    except Exception as exc:
+        logger.exception("POST /api/trial-landscape failed: query=%r", query)
+        return JSONResponse(
+            {"query": query, "total": None, "fetched": 0, "shown": 0, "without_asset": 0,
+             "partial": False, "exhaustive": False, "groups": [], "error": str(exc)},
             status_code=200,
         )
 
