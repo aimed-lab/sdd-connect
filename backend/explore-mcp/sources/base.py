@@ -46,6 +46,15 @@ def _try_parse(date_str: str) -> datetime | None:
         pass
     if re.fullmatch(r"\d{4}", s):   # year only — JS new Date('2024') is valid (UTC Jan 1)
         return datetime(int(s), 1, 1, tzinfo=timezone.utc)
+    try:
+        if re.fullmatch(r"\d{4}-\d{1,2}", s):   # ClinicalTrials.gov month precision, '2025-03'
+            y, m = s.split("-")
+            return datetime(int(y), int(m), 1, tzinfo=timezone.utc)
+        if re.fullmatch(r"\d{1,2}/\d{1,2}/\d{4}", s):   # Grants.gov 'MM/DD/YYYY'
+            m, d, y = s.split("/")
+            return datetime(int(y), int(m), int(d), tzinfo=timezone.utc)
+    except ValueError:
+        pass
     return None
 
 
@@ -67,6 +76,13 @@ def to_iso(date_str: str | None) -> str:
             except ValueError:
                 pass
     return _EPOCH_ISO
+
+
+def to_iso_or_none(date_str: str | None) -> str | None:
+    """Like to_iso(), but None instead of the epoch placeholder when the date is
+    missing or unparseable, so the UI shows no date rather than 1970-01-01."""
+    iso = to_iso(date_str)
+    return None if iso == _EPOCH_ISO else iso
 
 
 def fmt_date(iso_str: str) -> str:
