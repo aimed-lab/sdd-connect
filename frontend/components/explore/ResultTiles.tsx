@@ -7,7 +7,7 @@
 // border, serif title. Missing fields are hidden.
 
 import SaveButton from "@/components/explore/SaveButton";
-import { locationList, phaseGloss, shortList, statusGloss } from "@/lib/server/explore/trialGlossary";
+import { eligibilityText, locationList, phaseGloss, shortList, siteTotal, statusGloss } from "@/lib/server/explore/trialGlossary";
 import { kindLabel, relativeTime, TYPE_STYLES, typeKeyForKind } from "@/lib/typeStyles";
 import type { ApprovalRaw, ExploreItem, GrantRaw, TrialRaw } from "@/types/explore";
 
@@ -176,6 +176,7 @@ export function ApprovalTile({
   const brand = raw.brand?.trim() || item.title;
   const generic = raw.generic?.trim();
   const sponsor = raw.sponsor?.trim();
+  const indication = raw.indication_first_sentence?.trim();
   const chip = "px-2 py-0.5 rounded-full bg-white/55 text-[11px] whitespace-nowrap";
   return (
     <TileShell item={item}>
@@ -189,6 +190,10 @@ export function ApprovalTile({
         {brand}
       </h3>
       {generic && <p className="mt-0.5 text-[14px] leading-snug text-on-background/70">{generic}</p>}
+      {/* Verbatim from the FDA label. */}
+      {indication && (
+        <p className="mt-2 text-[13px] leading-snug text-on-background/75 line-clamp-4">{indication}</p>
+      )}
       {sponsor && <p className="mt-2 text-[13px] leading-snug text-on-background/70">{sponsor}</p>}
       {approvedText && <p className="mt-1 text-xs text-on-background/60">Approved {approvedText}</p>}
       {(priority || isNew) && (
@@ -236,6 +241,7 @@ export function TrialTile({
   const meta = [raw.nct_id, phase?.label].filter(Boolean).join(" · ");
   const plain = [phase?.plain && `${phase.label}: ${phase.plain}`, status?.plain && `${status.label}: ${status.plain}`].filter(Boolean);
   const places = locationList(raw);
+  const who = eligibilityText(raw);
   return (
     <TileShell item={item}>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -262,8 +268,9 @@ export function TrialTile({
         </div>
       )}
       {places.length > 0 && (
-        <p className="mt-1.5 text-xs leading-snug text-on-background/70">Where: {shortList(places)}</p>
+        <p className="mt-1.5 text-xs leading-snug text-on-background/70">Where: {shortList(places, 3, siteTotal(raw))}</p>
       )}
+      {who && <p className="mt-1 text-xs leading-snug text-on-background/70">Who can join: {who}</p>}
       {/* Verbatim from ClinicalTrials.gov, never paraphrased or summarised. */}
       {raw.why_stopped && (
         <p className="mt-2 text-[13px] leading-snug italic text-on-background/75">

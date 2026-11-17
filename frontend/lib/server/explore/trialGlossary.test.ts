@@ -5,12 +5,15 @@ import assert from "node:assert/strict";
 import {
   compareRows,
   conditionList,
+  eligibilityText,
+  emptyReasonText,
   interventionList,
   locationList,
   MAX_COMPARE,
   noteText,
   phaseGloss,
   shortList,
+  siteTotal,
   statusGloss,
   toggleCompare,
 } from "./trialGlossary.ts";
@@ -98,4 +101,48 @@ test("noteText reads a string or an object of strings, and nothing else", () => 
   assert.equal(noteText(null), null);
   assert.equal(noteText(["ALS"]), null);
   assert.equal(noteText({}), null);
+});
+
+test("the backend's sites come before locations, with the full site count", () => {
+  const raw = {
+    sites: [{ facility: "UAB", city: "Birmingham", state: "Alabama", country: "United States" }, { city: "Lyon", country: "France" }],
+    site_count: 14,
+    locations: ["ignored"],
+  };
+  assert.deepEqual(locationList(raw), ["Birmingham, Alabama", "Lyon, France"]);
+  assert.equal(siteTotal(raw), 14);
+  assert.equal(shortList(locationList(raw), 3, siteTotal(raw)), "Birmingham, Alabama, Lyon, France and 12 more");
+  assert.equal(siteTotal({}), 0);
+});
+
+test("eligibilityText reads ages, sex and healthy volunteers", () => {
+  assert.equal(
+    eligibilityText({ eligibility: { min_age: "18 Years", max_age: "75 Years", sex: "ALL", healthy_volunteers: false } }),
+    "Ages 18 Years to 75 Years · Any sex · No healthy volunteers"
+  );
+  assert.equal(eligibilityText({ eligibility: { min_age: "12 Years", sex: "FEMALE" } }), "Ages 12 Years and over · Women only");
+  assert.equal(eligibilityText({}), "");
+});
+
+test("compareRows adds who can join and sites from the new trial fields", () => {
+  const rows = compareRows([
+    trial("t1", { eligibility: { min_age: "18 Years" }, sites: [{ city: "Boston", state: "Massachusetts" }], site_count: 3 }),
+    trial("t2", {}),
+  ]);
+  assert.deepEqual(rows, [
+    { label: "Who can join", cells: ["Ages 18 Years and over", "Not listed"] },
+    { label: "Locations", cells: ["Boston, Massachusetts and 2 more", "Not listed"] },
+  ]);
+});
+
+test("emptyReasonText explains the codes that need words, and only those", () => {
+  assert.match(emptyReasonText("no_results")!, /no trials/);
+  assert.match(emptyReasonText("off_topic_filtered")!, /left out/);
+  for (const code of ["timed_out", "source_error", "tool_query", "no_query", null, 3]) assert.equal(emptyReasonText(code), null);
+});
+
+test("noteText reads the backend's interpreted object by its label", () => {
+  assert.equal(noteText({ entities: ["KRAS G12C"], filters: [{ key: "status" }], not_applied: [], label: "KRAS G12C · Recruiting" }), "KRAS G12C · Recruiting");
+  assert.equal(noteText({ label: "ALS", not_applied: ["location: Alabama"] }), "ALS (not applied: location: Alabama)");
+  assert.equal(noteText({ entities: [], filters: [], label: "" }), null);
 });

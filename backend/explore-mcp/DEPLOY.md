@@ -108,6 +108,9 @@ GITHUB_TOKEN=
 PREWARM_ENABLED=
 PREWARM_INTERVAL_SEC=
 PREWARM_TIMEOUT_SEC=
+PREWARM_TOPICS=
+PREWARM_TOPICS_INTERVAL_SEC=
+EXPLORE_DEADLINE_SEC=
 MCP_HOST=
 MCP_PORT=
 LOG_LEVEL=
@@ -380,12 +383,16 @@ project's credentials, never invent or reuse a value from another project.
 | `LLM_PROVIDER` | Optional | Which LLM provider to use. Defaults to `groq`. |
 | `LLM_MODEL` | Optional | Which model to use for the chosen provider. Has a built-in default. |
 | `LLM_API_KEY` | Optional | Overrides `GROQ_API_KEY` if you want a separate key just for LLM calls. Falls back to `GROQ_API_KEY` if unset. |
+| `EXPLORE_ONLY_SCOPE_LLM` | Optional | Whether a scoped search (the user picked e.g. "Trials") also asks the LLM to read the question, capped at 3 s and shared with the normal search's cache. Defaults on; set `0` to use only the built-in word rules. |
 | `NCBI_API_KEY` | Optional | Raises the PubMed/GEO rate limit. Works fine without it, just slower under load. |
 | `OPENALEX_API_KEY` | Strongly recommended | OpenAlex retired its unauthenticated "polite pool" on 2026-02-13; unset means the throttled common pool, and 429s under fan-out load are swallowed silently per-source. |
 | `GITHUB_TOKEN` | Optional | Raises the GitHub search rate limit. A read-only, no-scopes token is enough. |
 | `PREWARM_ENABLED` | Optional | Whether to pre-fetch the default landing-page results on startup. Defaults on. |
 | `PREWARM_INTERVAL_SEC` | Optional | How often the pre-fetch refreshes. Has a built-in default. |
 | `PREWARM_TIMEOUT_SEC` | Optional | Max time one pre-fetch attempt may run before being treated as failed. Has a built-in default. |
+| `PREWARM_TOPICS` | Optional | Comma-separated popular topics whose source results are pre-fetched in the background, one at a time, without any LLM call (at most 10 are used). Unset uses a built-in list; `0` turns it off. |
+| `PREWARM_TOPICS_INTERVAL_SEC` | Optional | How often the popular topics are refreshed. Defaults to 25 minutes. |
+| `EXPLORE_DEADLINE_SEC` | Optional | How long one search waits for its sources before marking the slow ones "didn't respond in time" and answering with the rest. Defaults to 25 s. Keep it well below the Next.js proxy's `maxDuration` (60 s in `frontend/app/api/explore/route.ts`). |
 | `MCP_HOST` | Optional | Which network interface to bind to. Defaults to all interfaces — leave unset in a container. |
 | `MCP_PORT` | Optional | Which port to listen on. Defaults to `8000`. |
 | `LOG_LEVEL` | Optional | Log verbosity (`DEBUG`/`INFO`/`WARNING`/`ERROR`). Defaults to `INFO`. |

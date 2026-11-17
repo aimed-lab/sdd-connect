@@ -33,6 +33,12 @@ export function createRateLimiter(windowMs: number, max: number): RateLimiter {
 export const ASSISTANT_WINDOW_MS = 10 * 60 * 1000;
 export const ASSISTANT_MAX_REQUESTS = 30;
 
+/** The caller's IP. On Vercel, x-vercel-forwarded-for and x-real-ip are set
+ *  by the platform itself; x-forwarded-for is the fallback for other hosts. */
 export function clientIp(req: Request): string {
-  return (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
+  for (const name of ["x-vercel-forwarded-for", "x-real-ip", "x-forwarded-for"]) {
+    const ip = (req.headers.get(name) ?? "").split(",")[0].trim();
+    if (ip) return ip;
+  }
+  return "unknown";
 }

@@ -91,27 +91,62 @@ export function conditionList(raw: TrialRaw): string[] {
   return Array.isArray(raw.conditions) ? raw.conditions.map(str).filter((c): c is string => !!c) : [];
 }
 
-/** Where the trial runs, when the response carries locations: strings, or
- *  {facility, city, state, country} objects shown as "City, Country". */
+/** Where the trial runs: the backend's `sites` ({facility, city, state,
+ *  country}), else `locations` (strings or the same objects). A site reads
+ *  "City, State" when it has a state, else "City, Country". */
 export function locationList(raw: TrialRaw): string[] {
-  if (!Array.isArray(raw.locations)) return [];
+  const list: unknown[] = Array.isArray(raw.sites) && raw.sites.length > 0 ? raw.sites : Array.isArray(raw.locations) ? raw.locations : [];
   const out: string[] = [];
-  for (const loc of raw.locations) {
-    const text =
-      str(loc) ??
-      (loc && typeof loc === "object"
-        ? [str((loc as Record<string, unknown>).city), str((loc as Record<string, unknown>).country)].filter(Boolean).join(", ") ||
-          str((loc as Record<string, unknown>).facility)
-        : null);
+  for (const loc of list) {
+    let text = str(loc);
+    if (!text && loc && typeof loc === "object") {
+      const o = loc as Record<string, unknown>;
+      const city = str(o.city);
+      const region = str(o.state) ?? str(o.country);
+      text = (city ? [city, region].filter(Boolean).join(", ") : region) || str(o.facility);
+    }
     if (text && !out.includes(text)) out.push(text);
   }
   return out;
 }
 
-/** "a, b, c" then "and N more" past `max`. */
-export function shortList(xs: string[], max = 3): string {
-  if (xs.length <= max) return xs.join(", ");
-  return `${xs.slice(0, max).join(", ")} and ${xs.length - max} more`;
+/** All the trial's sites, when the backend counted more than it sent. */
+export function siteTotal(raw: TrialRaw): number {
+  const shown = locationList(raw).length;
+  return typeof raw.site_count === "number" && raw.site_count > shown ? raw.site_count : shown;
+}
+
+/** "a, b, c" then "and N more" past `max`; `total` counts items not in `xs`. */
+export function shortList(xs: string[], max = 3, total = xs.length): string {
+  const more = Math.max(total, xs.length) - Math.min(xs.length, max);
+  const head = xs.slice(0, max).join(", ");
+  return more > 0 ? `${head} and ${more} more` : head;
+}
+
+/** "Ages 18 Years to 75 Years · Any sex · No healthy volunteers", from the
+ *  backend's eligibility fields; empty when there are none. */
+export function eligibilityText(raw: TrialRaw): string {
+  const e = raw.eligibility;
+  if (!e || typeof e !== "object") return "";
+  const min = str(e.min_age);
+  const max = str(e.max_age);
+  const age = min && max ? `Ages ${min} to ${max}` : min ? `Ages ${min} and over` : max ? `Ages up to ${max}` : null;
+  const sexKey = key(str(e.sex));
+  const sex = sexKey === "ALL" ? "Any sex" : sexKey === "FEMALE" ? "Women only" : sexKey === "MALE" ? "Men only" : null;
+  const healthy =
+    e.healthy_volunteers === true ? "Healthy volunteers can join" : e.healthy_volunteers === false ? "No healthy volunteers" : null;
+  return [age, sex, healthy].filter(Boolean).join(" · ");
+}
+
+const EMPTY_REASONS: Record<string, string> = {
+  no_results: "ClinicalTrials.gov has no trials for this search.",
+  off_topic_filtered: "Trials came back, but none were about this topic, so they were left out.",
+};
+
+/** A sentence for a section's `empty_reason` code. Codes with their own card
+ *  (timed_out, source_error) or nothing to say return null. */
+export function emptyReasonText(reason: unknown): string | null {
+  return typeof reason === "string" ? EMPTY_REASONS[reason] ?? null : null;
 }
 
 export const MAX_COMPARE = 3;
@@ -136,7 +171,8 @@ export function compareRows(items: ExploreItem[]): CompareRow[] {
     { label: "Sponsor", cells: raws.map((r) => str(r.lead_sponsor) ?? "") },
     { label: "Treatments tested", cells: raws.map((r) => interventionList(r).join("; ")) },
     { label: "Conditions", cells: raws.map((r) => conditionList(r).join("; ")) },
-    { label: "Locations", cells: raws.map((r) => shortList(locationList(r), 5)) },
+    { label: "Who can join", cells: raws.map(eligibilityText) },
+    { label: "Locations", cells: raws.map((r) => shortList(locationList(r), 5, siteTotal(r))) },
   ];
   return rows
     .filter((row) => row.cells.some(Boolean))
@@ -144,11 +180,19 @@ export function compareRows(items: ExploreItem[]): CompareRow[] {
 }
 
 /** A search note the response may carry (how the query was read), as text:
- *  a string as is, an object as "key: value" pairs. Anything else -> null. */
+ *  a string as is; the backend's `interpreted` object by its `label` (plus
+ *  what was not applied); another object as "key: value" pairs. */
 export function noteText(v: unknown): string | null {
   const s = str(v);
   if (s) return s;
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  if ("label" in o || "entities" in o || "filters" in o) {
+    const label = str(o.label);
+    const skipped = Array.isArray(o.not_applied) ? o.not_applied.map(str).filter(Boolean) : [];
+    if (!label) return null;
+    return skipped.length > 0 ? `${label} (not applied: ${skipped.join(", ")})` : label;
+  }
   const parts: string[] = [];
   for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
     const text = str(val) ?? (Array.isArray(val) ? val.map(str).filter(Boolean).join(", ") : null);

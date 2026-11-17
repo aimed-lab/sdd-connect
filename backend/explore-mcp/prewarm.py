@@ -38,6 +38,19 @@ Config:
                         it's treated as failed (default 20s — comfortably
                         above the ~9s observed cold cost, but bounded: this
                         used to be unbounded).
+
+POPULAR TOPICS. After the first landing-feed warm, a second loop warms the
+per-source caches (papers, trials, approvals, ...) for a short, capped list of
+popular topics, one topic at a time, with NO LLM call: each topic's scope comes
+from the deterministic parser (tools/query_intent.py) and its sources from the
+heuristic router (see tools.explore.prewarm_topic). GitHub is left out (its
+search budget is 30 requests a minute). A user's search for one of these
+topics then finds most of its source queries already cached; the LLM scope and
+routing calls are cached on their own after the first search.
+  PREWARM_TOPICS               comma-separated topics (default: _DEFAULT_TOPICS);
+                               "0"/"off" disables. At most _MAX_TOPICS are used.
+  PREWARM_TOPICS_INTERVAL_SEC  seconds between rounds (default 25 min, inside
+                               the 30-minute per-source fresh window).
 """
 
 from __future__ import annotations
@@ -53,6 +66,21 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_INTERVAL = 8 * 60     # 8 min — comfortably inside TTL_DEFAULT_FEED (10 min)
 _DEFAULT_WARM_TIMEOUT = 20.0   # seconds — generous over the ~9s observed cold cost
+
+_DEFAULT_TOPICS = (
+    "KRAS G12C",
+    "PHGDH",
+    "ALS",
+    "Alzheimer's disease",
+    "triple-negative breast cancer",
+    "glioblastoma",
+    "PCSK9",
+    "GLP-1",
+)
+_MAX_TOPICS = 10
+_DEFAULT_TOPICS_INTERVAL = 25 * 60   # inside TTL_SOURCE (30 min)
+_TOPICS_FIRST_DELAY = 30.0           # let the landing feed warm first
+_topics_state: dict = {"rounds": 0, "warmed": 0, "failures": 0, "last_ok": None, "last_error": None}
 
 _task: asyncio.Task | None = None
 _state: dict = {"runs": 0, "failures": 0, "timeouts": 0, "last_ok": None, "last_error": None}
@@ -97,6 +125,60 @@ def warm_timeout_seconds() -> float:
 
 def is_ready() -> bool:
     return _ready
+
+
+def popular_topics() -> list[str]:
+    """The capped topic list (PREWARM_TOPICS overrides the default)."""
+    raw = os.environ.get("PREWARM_TOPICS")
+    if raw is None:
+        topics = list(_DEFAULT_TOPICS)
+    elif raw.strip().lower() in {"", "0", "off", "false", "no"}:
+        return []
+    else:
+        topics = [t.strip() for t in raw.split(",") if t.strip()]
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in topics:
+        if t.lower() not in seen:
+            seen.add(t.lower())
+            out.append(t[:80])
+    return out[:_MAX_TOPICS]
+
+
+def topics_interval_seconds() -> float:
+    raw = (os.environ.get("PREWARM_TOPICS_INTERVAL_SEC") or "").strip()
+    try:
+        value = float(raw) if raw else _DEFAULT_TOPICS_INTERVAL
+    except ValueError:
+        value = _DEFAULT_TOPICS_INTERVAL
+    return value if value > 0 else _DEFAULT_TOPICS_INTERVAL
+
+
+async def _warm_topics_once() -> None:
+    """One round: each topic in turn (never in parallel), each bounded by
+    PREWARM_TIMEOUT_SEC. A failing topic is recorded and skipped."""
+    from tools.explore import prewarm_topic
+
+    timeout = warm_timeout_seconds()
+    for topic in popular_topics():
+        try:
+            await asyncio.wait_for(prewarm_topic(topic), timeout=timeout)
+            _topics_state["warmed"] += 1
+        except Exception as exc:     # includes TimeoutError
+            _topics_state["failures"] += 1
+            _topics_state["last_error"] = f"{topic}: {type(exc).__name__}"
+            logger.warning("prewarm: topic %r failed: %s", topic, _topics_state["last_error"])
+    _topics_state["rounds"] += 1
+    _topics_state["last_ok"] = time.time()
+
+
+async def _topics_loop() -> None:
+    if not popular_topics():
+        return
+    await asyncio.sleep(_TOPICS_FIRST_DELAY)
+    while True:
+        await _warm_topics_once()
+        await asyncio.sleep(topics_interval_seconds())
 
 
 async def _warm_once() -> None:
@@ -173,7 +255,7 @@ async def _loop_after_first() -> None:
 
 async def _run() -> None:
     await _first_warm_and_ready()
-    await _loop_after_first()
+    await asyncio.gather(_loop_after_first(), _topics_loop())
 
 
 async def start() -> None:
@@ -217,6 +299,7 @@ def status() -> dict:
         "timeout_seconds": warm_timeout_seconds(),
         "running": _task is not None and not _task.done(),
         "ready": _ready,
+        "topics": {"list": popular_topics(), "interval_seconds": topics_interval_seconds(), **_topics_state},
         **_state,
     }
 
