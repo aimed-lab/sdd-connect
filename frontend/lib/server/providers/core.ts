@@ -3,6 +3,7 @@
 // link, and "similar providers". No I/O and no next/* imports, so a client
 // component can import it and node --test can run it.
 
+import { providerCapabilities } from "./capabilities.ts";
 import { SYNONYM_GROUPS } from "./synonyms.ts";
 
 export type KeyFact = { value: string; label: string };
@@ -119,9 +120,15 @@ export function matchesQuery(
 export function filterProviders<T extends Pick<Provider, "name" | "services" | "description" | "category">>(
   providers: T[],
   query: string,
-  category: string | null
+  category: string | null,
+  capability: string | null = null
 ): T[] {
-  return providers.filter((p) => (!category || categoryKey(p.category) === category) && matchesQuery(p, query));
+  return providers.filter(
+    (p) =>
+      (!category || categoryKey(p.category) === category) &&
+      (!capability || providerCapabilities(p).includes(capability)) &&
+      matchesQuery(p, query)
+  );
 }
 
 /** The facts to show: only complete ones. An empty list means no strip at all. */

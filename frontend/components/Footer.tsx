@@ -1,5 +1,5 @@
 // Shared shell footer — per design/SHELL.md: wordmark + tagline, and an
-// understated row of links (About · Explore · Collaborate · Promote · Contact).
+// understated row of links (About · Explore · Collaborate · Promote · Contact · Developers).
 
 import Link from "next/link";
 
@@ -9,6 +9,7 @@ const LINKS = [
   { label: "Collaborate", href: "/collaborate" },
   { label: "Promote", href: "/promote" },
   { label: "Contact", href: "/contact" },
+  { label: "Developers", href: "/developers" },
 ] as const;
 
 export default function Footer() {
