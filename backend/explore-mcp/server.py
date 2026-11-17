@@ -21,6 +21,9 @@ episodes):
   • explore              — orchestration: reason over free text, route to tools, group results
 
 Also exposes plain-HTTP-only actions (no MCP tool, no Supabase writes):
+  • POST /api/explore/stream — the /api/explore result as NDJSON events
+    (meta, one section per source as it finishes, done), for the web app's
+    progressive results page. Same body, cache and trimming as /api/explore.
   • POST /api/explore-source — ONE named source's existing search_* function
     by `kind` (paper/news/trial/grant/tool/dataset/geneset/compound/target/
     episode), for a caller that already knows which single source it wants
@@ -80,18 +83,19 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import json
 import logging
 import os
 import sys
 
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, StreamingResponse
 
 import prewarm
 from cache import cache as _cache
-from response import trim_explore_result, trim_items
-from tools.explore import explore_async, normalize_only_kinds, normalize_source_filters
+from response import trim_explore_result, trim_items, trim_sections
+from tools.explore import explore_async, explore_stream, normalize_only_kinds, normalize_source_filters
 from tools.fetch_github_repo import fetch_github_repo_async
 from tools.find_provider import (
     classify_checklist_item_async,
@@ -674,44 +678,88 @@ async def explore_http(request):
     except Exception:
         logger.exception("POST /api/explore: request body is not valid JSON")
         body = {}
-    input_text = body.get("input", "") if isinstance(body, dict) else ""
-    raw_scope = body.get("scope") if isinstance(body, dict) else None
-    scope_terms = raw_scope if isinstance(raw_scope, list) else None
-    raw_since_year = body.get("since_year") if isinstance(body, dict) else None
-    try:
-        since_year = int(raw_since_year) if raw_since_year is not None else None
-    except (TypeError, ValueError):
-        since_year = None
-    raw_status_filter = body.get("status_filter") if isinstance(body, dict) else None
-    status_filter = (
-        [str(s).strip() for s in raw_status_filter if str(s).strip()]
-        if isinstance(raw_status_filter, list) else None
-    ) or None
-    # Optional `only_kinds`: ["grant"] etc. runs just those sources with the typed
-    # text as the query (no routing). Absent/empty/unknown -> normal behaviour.
-    raw_only = body.get("only_kinds") if isinstance(body, dict) else None
-    only_kinds = normalize_only_kinds(raw_only) or None
-    # Optional per-source filters (grant_open_only, grant_agencies, grant_sort,
-    # trial_location); see normalize_source_filters. Absent -> unchanged.
-    source_filters = normalize_source_filters(body) if isinstance(body, dict) else {}
+    args = _explore_args(body)
+    input_text = args["input_text"]
     try:
         # trim_* only on egress — the cached copy keeps its full `raw` so the
         # citation graph stays rebuildable server-side (see response.py).
-        return JSONResponse(
-            trim_explore_result(
-                await explore_async(
-                    input_text or "", scope_terms, since_year, status_filter,
-                    **({"only_kinds": only_kinds} if only_kinds else {}),
-                    **({"source_filters": source_filters} if source_filters else {}),
-                )
-            )
-        )
+        return JSONResponse(trim_explore_result(await explore_async(**args)))
     except Exception as exc:
         logger.exception("POST /api/explore failed: input=%r", input_text)
         return JSONResponse(
             {"input": input_text, "scope": {}, "tools_called": [], "sections": [], "error": str(exc)},
             status_code=200,
         )
+
+
+def _explore_args(body) -> dict:
+    """explore_async keyword arguments from a POST /api/explore(/stream) body."""
+    body = body if isinstance(body, dict) else {}
+    input_text = body.get("input", "")
+    raw_scope = body.get("scope")
+    raw_since_year = body.get("since_year")
+    try:
+        since_year = int(raw_since_year) if raw_since_year is not None else None
+    except (TypeError, ValueError):
+        since_year = None
+    raw_status_filter = body.get("status_filter")
+    status_filter = (
+        [str(s).strip() for s in raw_status_filter if str(s).strip()]
+        if isinstance(raw_status_filter, list) else None
+    ) or None
+    args: dict = {
+        "input_text": input_text or "",
+        "scope_terms": raw_scope if isinstance(raw_scope, list) else None,
+        "since_year": since_year,
+        "status_filter": status_filter,
+    }
+    # Optional `only_kinds`: ["grant"] etc. runs just those sources with the typed
+    # text as the query (no routing). Absent/empty/unknown -> normal behaviour.
+    only_kinds = normalize_only_kinds(body.get("only_kinds")) or None
+    if only_kinds:
+        args["only_kinds"] = only_kinds
+    # Optional per-source filters (grant_open_only, grant_agencies, grant_sort,
+    # trial_location); see normalize_source_filters. Absent -> unchanged.
+    source_filters = normalize_source_filters(body)
+    if source_filters:
+        args["source_filters"] = source_filters
+    return args
+
+
+# Headers that keep proxies from holding a stream back: no-transform stops
+# compression/rewrites, X-Accel-Buffering: no turns off nginx buffering.
+_STREAM_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "X-Accel-Buffering": "no",
+}
+
+
+def _ndjson(event: dict) -> bytes:
+    if event.get("type") == "section":
+        event = {**event, "section": trim_sections([event["section"]])[0]}
+    return (json.dumps(event, default=str) + "\n").encode()
+
+
+@mcp.custom_route("/api/explore/stream", methods=["POST"])
+async def explore_stream_http(request):
+    """POST /api/explore with the result sent as NDJSON events while the
+    sources answer (#95): `meta` first, one `section` per source as it
+    finishes, and always a final `done` (see tools/explore.explore_stream).
+    Same body, cache and trimming as /api/explore, which stays the fallback.
+    When the client disconnects, the stream stops; the source fetches already
+    running finish in the background and fill the per-tool cache."""
+    try:
+        body = await request.json()
+    except Exception:
+        logger.exception("POST /api/explore/stream: request body is not valid JSON")
+        body = {}
+    args = _explore_args(body)
+
+    async def events():
+        async for event in explore_stream(**args):
+            yield _ndjson(event)
+
+    return StreamingResponse(events(), media_type="application/x-ndjson", headers=_STREAM_HEADERS)
 
 
 @mcp.custom_route("/api/trial-landscape", methods=["POST"])

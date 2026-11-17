@@ -24,6 +24,7 @@ if the routing JSON can't be parsed.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import datetime
 import json
@@ -1074,12 +1075,14 @@ def _is_tool_query_without_data(text: str, scope: dict) -> bool:
     return bool(scope.get("methods")) and not scope.get("genes") and not scope.get("diseases")
 
 
-async def _execute(
+def _plan(
     chosen: list[str], scope: dict, since_year: int | None = None,
     status_filter: list[str] | None = None, papers_include_methods: bool = False,
     source_filters: dict | None = None,
     query_overrides: dict[str, str] | None = None,
-) -> list[dict]:
+) -> tuple[list[tuple[str, str, str]], list]:
+    """(specs, awaitables): one (tool, kind, display_query) per source that
+    will run, and the matching un-awaited fetch."""
     overrides = query_overrides or {}
     tasks = []
     specs: list[tuple[str, str, str]] = []  # (tool, kind, display_query)
@@ -1178,7 +1181,85 @@ async def _execute(
         else:
             tasks.append(_dispatch(name, query))
         specs.append((name, _KINDS[name], query))
+    return specs, tasks
 
+
+def _build_section(tool: str, kind: str, query: str, result, scope: dict) -> dict:
+    """One finished source's result (items, an exception, or _TIMED_OUT) as a
+    section."""
+    section: dict = {"tool": tool, "kind": kind, "query": query}
+    if isinstance(result, Exception):
+        # one tool failing never sinks the others; report an empty, flagged section
+        logger.exception(
+            "explore: tool %s failed for query=%r", tool, query, exc_info=result
+        )
+        section = _error_section(tool, kind, query, result)
+    elif result is _TIMED_OUT:
+        # Over the per-tool cap: the page still loads, and the section says
+        # it ran out of time (not that it found nothing).
+        section["items"] = []
+        if tool == "search_papers":
+            section["items_key"] = []
+        section["timed_out"] = True
+        section["empty_reason"] = "timed_out"
+    elif tool == "search_papers":
+        # search_papers_multi_dual_async returns (latest, key) — TWO
+        # orderings of the SAME already-ranked pool (see that function's
+        # docstring). `items` stays the existing date-desc "Latest
+        # Papers" view (so every OTHER caller/consumer of a papers
+        # section is unaffected); `items_key` is the additional WINNER-
+        # ranked "Key Papers" view the frontend renders as a second
+        # subsection under the same Papers tab (see CategoryStrip —
+        # this is not a new top-level kind/tab).
+        latest, key = result
+        section["items"] = latest
+        section["items_key"] = key
+        # Typed searches also get a "Most relevant" order of the same papers.
+        if scope.get("_raw_input") and not scope.get("is_default"):
+            section["items_relevant"] = _relevance_order(latest, key, scope["_raw_input"])
+    else:
+        section["items"] = [item.model_dump() for item in result]
+    if kind == "approval":
+        section["note"] = dict(_FDA_NOTE)
+    return section
+
+
+def _error_section(tool: str, kind: str, query: str, exc: BaseException) -> dict:
+    section: dict = {"tool": tool, "kind": kind, "query": query, "items": []}
+    if tool == "search_papers":
+        section["items_key"] = []
+    section["error"] = f"{type(exc).__name__}: {exc}"
+    if kind == "approval":
+        section["note"] = dict(_FDA_NOTE)
+    return section
+
+
+def _paper_dois(sections: list[dict]) -> set[str]:
+    return {
+        (i.get("doi") or "").lower()
+        for s in sections if s["tool"] == "search_papers"
+        for i in [*s.get("items", []), *s.get("items_key", [])]
+        if i.get("doi")
+    }
+
+
+def _drop_paper_duplicates(section: dict, paper_dois: set[str]) -> None:
+    """A preprint with the same DOI as a returned paper is the same work: show
+    it once, as the paper."""
+    if paper_dois and section["tool"] == "search_preprints":
+        section["items"] = [i for i in section["items"] if (i.get("doi") or "").lower() not in paper_dois]
+
+
+async def _execute(
+    chosen: list[str], scope: dict, since_year: int | None = None,
+    status_filter: list[str] | None = None, papers_include_methods: bool = False,
+    source_filters: dict | None = None,
+    query_overrides: dict[str, str] | None = None,
+) -> list[dict]:
+    specs, tasks = _plan(
+        chosen, scope, since_year, status_filter, papers_include_methods,
+        source_filters, query_overrides,
+    )
     results = (
         await asyncio.gather(
             *(_capped(tool, query, t) for (tool, _kind, query), t in zip(specs, tasks)),
@@ -1186,61 +1267,61 @@ async def _execute(
         )
         if tasks else []
     )
-
-    sections: list[dict] = []
-    for (tool, kind, query), result in zip(specs, results):
-        section: dict = {"tool": tool, "kind": kind, "query": query}
-        if isinstance(result, Exception):
-            # one tool failing never sinks the others; report an empty, flagged section
-            section["items"] = []
-            if tool == "search_papers":
-                section["items_key"] = []
-            section["error"] = f"{type(result).__name__}: {result}"
-            logger.exception(
-                "explore: tool %s failed for query=%r", tool, query, exc_info=result
-            )
-        elif result is _TIMED_OUT:
-            # Over the per-tool cap: the page still loads, and the section says
-            # it ran out of time (not that it found nothing).
-            section["items"] = []
-            if tool == "search_papers":
-                section["items_key"] = []
-            section["timed_out"] = True
-            section["empty_reason"] = "timed_out"
-        elif tool == "search_papers":
-            # search_papers_multi_dual_async returns (latest, key) — TWO
-            # orderings of the SAME already-ranked pool (see that function's
-            # docstring). `items` stays the existing date-desc "Latest
-            # Papers" view (so every OTHER caller/consumer of a papers
-            # section is unaffected); `items_key` is the additional WINNER-
-            # ranked "Key Papers" view the frontend renders as a second
-            # subsection under the same Papers tab (see CategoryStrip —
-            # this is not a new top-level kind/tab).
-            latest, key = result
-            section["items"] = latest
-            section["items_key"] = key
-            # Typed searches also get a "Most relevant" order of the same papers.
-            if scope.get("_raw_input") and not scope.get("is_default"):
-                section["items_relevant"] = _relevance_order(latest, key, scope["_raw_input"])
-        else:
-            section["items"] = [item.model_dump() for item in result]
-        if kind == "approval":
-            section["note"] = dict(_FDA_NOTE)
-        sections.append(section)
-
-    # A preprint with the same DOI as a returned paper is the same work: show
-    # it once, as the paper.
-    paper_dois = {
-        (i.get("doi") or "").lower()
-        for s in sections if s["tool"] == "search_papers"
-        for i in [*s.get("items", []), *s.get("items_key", [])]
-        if i.get("doi")
-    }
-    if paper_dois:
-        for s in sections:
-            if s["tool"] == "search_preprints":
-                s["items"] = [i for i in s["items"] if (i.get("doi") or "").lower() not in paper_dois]
+    sections = [_build_section(tool, kind, query, result, scope) for (tool, kind, query), result in zip(specs, results)]
+    dois = _paper_dois(sections)
+    for s in sections:
+        _drop_paper_duplicates(s, dois)
     return sections
+
+
+async def _execute_stream(specs: list[tuple[str, str, str]], tasks: list, scope: dict):
+    """Run the planned sources and yield (index, section) as each finishes, in
+    completion order. index is the source's position in `specs`, so the caller
+    can rebuild the order _execute returns.
+
+    Papers go out whole (items, items_key and items_relevant together), and
+    preprints are held until papers are done, so the DOI de-duplication above
+    is applied before a preprint is ever shown. A section that fails to build
+    becomes an error section; it never ends the stream. Leaving early (client
+    gone) cancels only the waits: each fetch is shielded in _capped, so it
+    still finishes and fills the per-tool cache."""
+    waits = [asyncio.ensure_future(_capped(tool, query, t)) for (tool, _kind, query), t in zip(specs, tasks)]
+    index = {w: i for i, w in enumerate(waits)}
+    pending = set(waits)
+    papers_left = sum(1 for tool, _k, _q in specs if tool == "search_papers")
+    papers: list[dict] = []
+    held: list[tuple[int, dict]] = []
+    try:
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            ready: list[tuple[int, dict]] = []
+            for w in sorted(done, key=index.__getitem__):
+                i = index[w]
+                tool, kind, query = specs[i]
+                try:
+                    exc = w.exception()
+                    result = exc if exc is not None else w.result()
+                    section = _build_section(tool, kind, query, result, scope)
+                except Exception as exc:  # noqa: BLE001 — one section never ends the stream
+                    logger.exception("explore stream: building section %s failed", tool)
+                    section = _error_section(tool, kind, query, exc)
+                if tool == "search_papers":
+                    papers.append(section)
+                    papers_left -= 1
+                if tool == "search_preprints" and papers_left > 0:
+                    held.append((i, section))
+                    continue
+                ready.append((i, section))
+            if papers_left == 0 and held:
+                ready.extend(held)
+                held = []
+            dois = _paper_dois(papers)
+            for i, section in ready:
+                _drop_paper_duplicates(section, dois)
+                yield i, section
+    finally:
+        for w in pending:
+            w.cancel()
 
 
 _TOOL_FOR_KIND: dict[str, str] = {kind: tool for tool, kind in _KINDS.items()}
@@ -1557,6 +1638,21 @@ async def _explore_uncached(
 ) -> dict:
     """The real orchestration: extract scope, route, fan out, assemble."""
     _start_deadline()
+    prep = await _prepare(input_text, scope_terms, source_filters)
+    sections = await _execute(prep["chosen"], prep["exec_scope"], since_year, status_filter, **prep["extra"])
+    return {
+        "input": input_text,
+        "scope": prep["scope"],
+        "tools_called": prep["chosen"],
+        "reasoning": prep["reasoning"],
+        "sections": sections,
+    }
+
+
+async def _prepare(
+    input_text: str, scope_terms: list[str] | None, source_filters: dict | None,
+) -> dict:
+    """Scope extraction and routing for one explore call: what _execute runs."""
     if not (input_text or "").strip():
         chosen = list(_DEFAULT_TOOLS)
         if scope_terms:
@@ -1625,14 +1721,7 @@ async def _explore_uncached(
     if source_filters:
         extra["source_filters"] = source_filters
     exec_scope = {**scope, "_raw_input": input_text} if (input_text or "").strip() else scope
-    sections = await _execute(chosen, exec_scope, since_year, status_filter, **extra)
-    return {
-        "input": input_text,
-        "scope": scope,
-        "tools_called": chosen,
-        "reasoning": reasoning,
-        "sections": sections,
-    }
+    return {"scope": scope, "chosen": chosen, "reasoning": reasoning, "exec_scope": exec_scope, "extra": extra}
 
 
 def _has_failed_section(result: dict) -> bool:
@@ -1737,17 +1826,7 @@ async def explore_async(
             await cache.expire_soon(normalize_key(only_key, input_text), _TIMED_OUT_RECHECK)
         return only_result
 
-    base_key = "explore:interests" if terms else "explore"
-    key_terms = terms if terms else input_text
-    if since_year is not None:
-        base_key += f":since{since_year}"
-    if status_filter:
-        base_key += f":status{','.join(status_filter)}"
-    base_key += fkey
-    key = normalize_key(base_key, key_terms)
-    ttl, stale = (
-        (TTL_DEFAULT_FEED, STALE_DEFAULT_FEED) if blank else (TTL_TOPIC, STALE_TOPIC)
-    )
+    key, ttl, stale = _whole_result_key(input_text, terms, since_year, status_filter, fkey)
     result = await cache.get_or_compute(
         key,
         lambda: _explore_uncached(input_text, terms, since_year, status_filter, **fextra),
@@ -1758,6 +1837,132 @@ async def explore_async(
         # fetch finishes in the background (see _capped).
         await cache.expire_soon(key, _TIMED_OUT_RECHECK)
     return result
+
+
+def _whole_result_key(
+    input_text: str, terms: list[str], since_year: int | None,
+    status_filter: list[str] | None, fkey: str,
+) -> tuple[str, float, float]:
+    """(cache key, ttl, stale ttl) of a routed explore result. See
+    explore_async's CACHE KEYS."""
+    base_key = "explore:interests" if terms else "explore"
+    key_terms = terms if terms else input_text
+    if since_year is not None:
+        base_key += f":since{since_year}"
+    if status_filter:
+        base_key += f":status{','.join(status_filter)}"
+    base_key += fkey
+    blank = not (input_text or "").strip()
+    ttl, stale = (
+        (TTL_DEFAULT_FEED, STALE_DEFAULT_FEED) if blank else (TTL_TOPIC, STALE_TOPIC)
+    )
+    return normalize_key(base_key, key_terms), ttl, stale
+
+
+def _meta_event(result: dict, pending_kinds: list[str]) -> dict:
+    meta = {
+        "type": "meta",
+        "input": result.get("input", ""),
+        "scope": result.get("scope", {}),
+        "tools_called": result.get("tools_called", []),
+        "reasoning": result.get("reasoning"),
+        "pending_kinds": pending_kinds,
+    }
+    if "interpreted" in result:
+        meta["interpreted"] = result["interpreted"]
+    return meta
+
+
+def _whole_result_events(result: dict, cached: bool):
+    sections = result.get("sections", [])
+    yield _meta_event(result, [s["kind"] for s in sections])
+    for s in sections:
+        yield {"type": "section", "section": s}
+    yield {"type": "done", "complete": True, "cached": cached}
+
+
+async def explore_stream(
+    input_text: str, scope_terms: list[str] | None = None, since_year: int | None = None,
+    status_filter: list[str] | None = None, only_kinds: list[str] | None = None,
+    source_filters: dict | None = None,
+):
+    """explore_async as a stream of events (#95), for POST /api/explore/stream:
+
+      {"type": "meta", input, scope, tools_called, reasoning, pending_kinds[, interpreted]}
+      {"type": "section", "section": {...}}   one per source, as it finishes
+      {"type": "done", "complete": bool, "cached": bool[, "error": str]}
+
+    `done` is always the last event, also after a failure (complete: false).
+    Sections are the same dicts explore_async returns (untrimmed; the HTTP
+    route trims them). Papers arrive whole and preprints only after papers, so
+    preprints are already de-duplicated against paper DOIs; a timed-out or
+    failed source arrives as its usual timed_out / error section.
+
+    Same whole-result cache as explore_async: a hit (fresh, or stale with a
+    background refresh) emits everything at once; a miss streams and writes
+    the cache only when every section is in, so a client that leaves early
+    never caches a partial page. Concurrent identical misses are not
+    coalesced here (the per-tool caches still are).
+
+    `only_kinds` searches gate, retry and label their sections only after
+    every source is in (see _execute_only), so they are computed whole and
+    sent at once."""
+    blank = not (input_text or "").strip()
+    terms = _clean_terms(scope_terms) if blank else []
+    source_filters = {} if blank else normalize_source_filters(source_filters)
+    fkey = _filters_key(source_filters)
+    fextra = {"source_filters": source_filters} if source_filters else {}
+    kinds = [] if blank else normalize_only_kinds(only_kinds)
+    sent_meta = False
+    try:
+        if kinds:
+            result = await explore_async(
+                input_text, scope_terms, since_year, status_filter,
+                only_kinds=kinds, **fextra,
+            )
+            for event in _whole_result_events(result, cached=False):
+                yield event
+            return
+
+        key, ttl, stale = _whole_result_key(input_text, terms, since_year, status_filter, fkey)
+        cached = await cache.peek(
+            key,
+            lambda: _explore_uncached(input_text, terms, since_year, status_filter, **fextra),
+            ttl, stale,
+        )
+        if cached is not None:
+            for event in _whole_result_events(cached, cached=True):
+                yield event
+            return
+
+        _start_deadline()
+        prep = await _prepare(input_text, terms, source_filters)
+        specs, tasks = _plan(
+            prep["chosen"], prep["exec_scope"], since_year, status_filter, **prep["extra"],
+        )
+        result = {
+            "input": input_text,
+            "scope": prep["scope"],
+            "tools_called": prep["chosen"],
+            "reasoning": prep["reasoning"],
+        }
+        yield _meta_event(result, [kind for _tool, kind, _q in specs])
+        sent_meta = True
+        by_index: dict[int, dict] = {}
+        async with contextlib.aclosing(_execute_stream(specs, tasks, prep["exec_scope"])) as stream:
+            async for i, section in stream:
+                by_index[i] = section
+                yield {"type": "section", "section": section}
+        result["sections"] = [by_index[i] for i in sorted(by_index)]
+        await cache.put(key, result, ttl, stale)
+        if _has_failed_section(result):
+            await cache.expire_soon(key, _TIMED_OUT_RECHECK)
+        yield {"type": "done", "complete": True, "cached": False}
+    except Exception as exc:  # noqa: BLE001 — the client always gets a done
+        logger.exception("explore stream failed: input=%r", input_text)
+        if not sent_meta:
+            yield {"type": "meta", "input": input_text, "scope": {}, "tools_called": [], "pending_kinds": []}
+        yield {"type": "done", "complete": False, "cached": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
 def explore(

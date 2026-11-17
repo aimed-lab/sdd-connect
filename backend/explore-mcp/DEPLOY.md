@@ -293,6 +293,25 @@ optional keys in §6/§7 configured, you should also see non-empty
 section's `"items"` empty, with no `"error"` field set anywhere — go to
 §11 (Troubleshooting).
 
+The streaming twin, `POST /api/explore/stream`, sends the same result as
+NDJSON lines while the sources answer. Check that nothing in front of the
+container (nginx, a load balancer) holds it back until the end:
+
+```bash
+curl -sN -X POST https://<your-domain>/api/explore/stream \
+  -H "Content-Type: application/json" \
+  -d '{"input":"PHGDH serine metabolism"}' | while read -r line; do echo "$(date +%T) ${line:0:60}"; done
+```
+
+A `meta` line arrives at once, then one `section` line per source a few
+seconds apart, then `done`. If every line arrives at the same moment, the
+proxy is buffering: turn buffering off for this path (nginx:
+`proxy_buffering off;`; the response already sends `X-Accel-Buffering: no`
+and `Cache-Control: no-cache, no-transform`). The web app falls back to
+`/api/explore` when the stream fails, so a buffering proxy is slow, not broken.
+Use a search that is not cached yet (the landing feed is pre-warmed): a
+cached answer arrives all at once by design.
+
 ## 11. Troubleshooting
 
 **Start here for anything unexpected: `docker logs explore-mcp`.**
