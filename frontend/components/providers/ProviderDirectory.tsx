@@ -1,11 +1,13 @@
 "use client";
 
-// The search box, category chips and card grid of /collaborate/providers. The
-// whole list is passed in (22 companies), so searching and filtering are
-// instant and client side: every word typed must appear in the name, services,
-// description or category label.
+// The search box, category and capability chips and card grid of
+// /collaborate/providers. The whole list is passed in (22 companies), so
+// searching and filtering are instant and client side: every word typed must
+// appear in the name, services, description or category label. Capability
+// tags come from each company's own services text (capabilities.ts).
 
 import { useMemo, useState } from "react";
+import { capabilityCounts } from "@/lib/server/providers/capabilities";
 import { categoryCounts, filterProviders, type Provider } from "@/lib/server/providers/core";
 import ProviderCard from "./ProviderCard";
 
@@ -21,9 +23,14 @@ function chip(active: boolean) {
 export default function ProviderDirectory({ providers }: { providers: Provider[] }) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
+  const [capability, setCapability] = useState<string | null>(null);
 
   const chips = useMemo(() => categoryCounts(providers), [providers]);
-  const shown = useMemo(() => filterProviders(providers, query, category), [providers, query, category]);
+  const capabilityChips = useMemo(() => capabilityCounts(providers), [providers]);
+  const shown = useMemo(
+    () => filterProviders(providers, query, category, capability),
+    [providers, query, category, capability]
+  );
 
   return (
     <div>
@@ -57,9 +64,30 @@ export default function ProviderDirectory({ providers }: { providers: Provider[]
         ))}
       </div>
 
+      {capabilityChips.length > 0 && (
+        <div className="mt-4">
+          <p id="capability-chips" className="type-label text-secondary">
+            What they can do
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2" role="group" aria-labelledby="capability-chips">
+            {capabilityChips.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                aria-pressed={capability === c.id}
+                className={chip(capability === c.id)}
+                onClick={() => setCapability(capability === c.id ? null : c.id)}
+              >
+                {c.label} ({c.count})
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <p className="mt-6 text-sm text-secondary/80" aria-live="polite">
         {shown.length} {shown.length === 1 ? "provider" : "providers"}
-        {(query.trim() || category) && " matching"}
+        {(query.trim() || category || capability) && " matching"}
       </p>
 
       {shown.length === 0 ? (

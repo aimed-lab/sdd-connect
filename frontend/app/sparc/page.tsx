@@ -3,6 +3,7 @@
 //
 //   * Publications: every paper in lib/labPapers.ts, newest first.
 //   * Tools and Patents: lib/sparcTools.ts (copied from aimed-lab.org/software).
+//     Tools, papers and patents are also served read-only as JSON at /api/sparc.
 //   * Datasets: the lab's own entry in lib/curated.ts, chosen by the id list below.
 //
 // Server component. Not in the top nav.
@@ -13,7 +14,7 @@ import SectionHeading from "@/components/explore/SectionHeading";
 import SparcPapers from "@/components/sparc/SparcPapers";
 import { curatedDatasets, curatedToExploreItem } from "@/lib/curated";
 import { LAB_PUBLICATIONS_URL } from "@/lib/labPapers";
-import { SPARC_SOFTWARE_URL, sparcPatents, sparcTools } from "@/lib/sparcTools";
+import { SPARC_SOFTWARE_URL, sparcPatents, sparcTools, patentDetails, type SparcPatent } from "@/lib/sparcTools";
 
 // Cell Maps for AI (CM4AI) is the lab's own data release (cm4ai.org; the lab's
 // "Cell Maps for Artificial Intelligence" paper is in labPapers.ts). Tools and patents
@@ -27,6 +28,35 @@ const WHITE_CARDS =
 const LINK = "text-[#1A5632] hover:text-[#033319] hover:underline underline-offset-4";
 
 export const metadata = { title: "SPARC Center resources" };
+
+// Number, status, link and licensing contact, each only when the data has it.
+function PatentDetailsRow({ patent }: { patent: SparcPatent }) {
+  const d = patentDetails(patent);
+  if (!d.number && !d.status && !d.url && !d.licensingContact) return null;
+  return (
+    <p className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[13px] leading-5 text-secondary">
+      {d.number && <span>{d.number}</span>}
+      {d.status && <span>{d.status}</span>}
+      {d.url && (
+        <a href={d.url} target="_blank" rel="noopener noreferrer" className={LINK}>
+          Patent record ↗
+        </a>
+      )}
+      {d.licensingContact && (
+        <span>
+          Licensing:{" "}
+          {d.licensingHref ? (
+            <a href={d.licensingHref} target="_blank" rel="noopener noreferrer" className={LINK}>
+              {d.licensingContact}
+            </a>
+          ) : (
+            d.licensingContact
+          )}
+        </span>
+      )}
+    </p>
+  );
+}
 
 export default function SparcPage() {
   const datasets = curatedDatasets.filter((d) => SPARC_DATASET_IDS.includes(d.id)).map((d) => curatedToExploreItem(d, "dataset"));
@@ -117,6 +147,7 @@ export default function SparcPage() {
                     <span className="shrink-0 text-[13px] leading-5 text-secondary">{p.year}</span>
                   </div>
                   <p className="text-[13px] leading-5 text-secondary">{p.note}</p>
+                  <PatentDetailsRow patent={p} />
                 </li>
               ))}
             </ul>

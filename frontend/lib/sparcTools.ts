@@ -118,7 +118,21 @@ export const sparcTools: SparcTool[] = [
   },
 ];
 
-export type SparcPatent = { title: string; year: number; note: string };
+export type SparcPatent = {
+  title: string;
+  year: number;
+  note: string;
+  // Optional, shown only when present. Fill these in only from SPARC staff or
+  // the patent record itself; never guess a number, status or contact.
+  /** Application or patent number, e.g. "US 1,234,567 B2". */
+  number?: string;
+  /** e.g. "Granted", "Pending", "Licensed". */
+  status?: string;
+  /** Google Patents, USPTO or WIPO page for this patent. */
+  url?: string;
+  /** Who to ask about licensing: an email address or a web page. */
+  licensingContact?: string;
+};
 
 export const sparcPatents: SparcPatent[] = [
   {
@@ -157,3 +171,34 @@ export const sparcPatents: SparcPatent[] = [
     note: "US provisional patent filed January 2001.",
   },
 ];
+
+export type PatentDetails = {
+  number?: string;
+  status?: string;
+  url?: string;
+  licensingContact?: string;
+  /** mailto: or http(s) link for the licensing contact, when it is one. */
+  licensingHref?: string;
+};
+
+const WEB = /^https?:\/\/\S+$/i;
+const EMAIL = /^[^\s@/]+@[^\s@/]+\.[^\s@/]+$/;
+
+/** The optional patent fields that are actually filled in, trimmed. A link is
+ *  kept only when it is an http(s) address. */
+export function patentDetails(p: SparcPatent): PatentDetails {
+  const out: PatentDetails = {};
+  const number = p.number?.trim();
+  const status = p.status?.trim();
+  const url = p.url?.trim();
+  const contact = p.licensingContact?.trim();
+  if (number) out.number = number;
+  if (status) out.status = status;
+  if (url && WEB.test(url)) out.url = url;
+  if (contact) {
+    out.licensingContact = contact;
+    if (EMAIL.test(contact)) out.licensingHref = `mailto:${contact}`;
+    else if (WEB.test(contact)) out.licensingHref = contact;
+  }
+  return out;
+}

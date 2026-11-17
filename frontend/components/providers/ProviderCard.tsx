@@ -1,14 +1,17 @@
 // One provider as a card (directory grid, and "Similar providers"): cover image
 // cropped from the top, the event label, category, name, description, then the
 // first key fact if there is one, else up to 3 service chips, then the location
-// (or "N services") and "View". The whole card is one link. Server-safe.
+// (or "N services") and "View". Capability tags (derived from the services
+// text) sit under the description. The whole card is one link. Server-safe.
 
 import Image from "next/image";
 import Link from "next/link";
+import { capabilityLabel, providerCapabilities } from "@/lib/server/providers/capabilities";
 import { cardFooterText, categoryLabel, visibleKeyFacts, type Provider } from "@/lib/server/providers/core";
 
 export default function ProviderCard({ provider: p }: { provider: Provider }) {
   const fact = visibleKeyFacts(p)[0];
+  const capabilities = providerCapabilities(p);
   return (
     <Link
       href={`/collaborate/providers/${p.slug}`}
@@ -30,6 +33,12 @@ export default function ProviderCard({ provider: p }: { provider: Provider }) {
         <p className="mt-2 font-label-sm text-label-sm text-primary">{categoryLabel(p.category)}</p>
         <h3 className="mt-1 font-title text-[20px] leading-tight font-medium text-on-background">{p.name}</h3>
         <p className="mt-2 font-body-sm text-body-sm text-secondary line-clamp-3">{p.description}</p>
+
+        {capabilities.length > 0 && (
+          <p className="mt-2 font-label-sm text-label-sm text-primary/80">
+            {capabilities.map(capabilityLabel).join(" · ")}
+          </p>
+        )}
 
         {fact ? (
           <p className="mt-3 flex items-baseline gap-2">
