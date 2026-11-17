@@ -2,7 +2,7 @@
 
 // Shared shell nav. Left: the menu button (opens the side menu,
 // components/SideMenu.tsx, on every screen size), the wordmark, then Explore /
-// Collaborate / Promote with an active highlight (desktop only). Right: Sign in
+// Collaborate / Promote / Events with an active highlight (desktop only). Right: Sign in
 // (desktop; on a phone it is in the side menu), or the inbox bell and a round
 // profile button that links to Settings.
 // VISUAL style is taken from
@@ -31,6 +31,7 @@ const PILLARS = [
   { label: "Explore", href: "/explore" },
   { label: "Collaborate", href: "/collaborate" },
   { label: "Promote", href: "/promote" },
+  { label: "Events", href: "/events" },
 ] as const;
 
 // Projects used to be a pillar here (added only when signed in, since a
@@ -98,7 +99,7 @@ export default function Nav() {
       <nav className="fixed top-0 left-0 w-full z-50 h-16 bg-[#fbfaf7]/85 backdrop-blur-xl border-b border-[#e7e4dc]">
         <div className="max-w-container-max mx-auto h-full flex justify-between items-center gap-2 px-margin-mobile md:px-margin-desktop">
           {/* Left: menu button + wordmark + center pillars */}
-          <div className="flex items-center gap-8 min-w-0">
+          <div className="flex items-center gap-4 lg:gap-8 min-w-0">
             <div className="flex items-center gap-1 min-w-0">
               <button
                 ref={menuButtonRef}
@@ -113,12 +114,13 @@ export default function Nav() {
                   menu
                 </span>
               </button>
-              {/* Smaller on a phone only, so the bell and the profile button fit beside it. */}
-              <Link href="/" className="min-w-0 truncate font-label-md text-[24px] max-sm:text-[18px] leading-8 font-bold text-on-background">
+              {/* Smaller on a phone, so the bell and the profile button fit beside it, and on a
+                  tablet, so it fits beside the four pillars. */}
+              <Link href="/" className="min-w-0 truncate font-label-md text-[24px] max-sm:text-[18px] md:max-lg:text-[20px] leading-8 font-bold text-on-background">
                 SmartDrugDiscovery
               </Link>
             </div>
-            <div className="hidden md:flex items-center gap-6">
+            <div className="hidden md:flex items-center gap-4 lg:gap-6">
               {PILLARS.map((p) => (
                 <Link
                   key={p.href}

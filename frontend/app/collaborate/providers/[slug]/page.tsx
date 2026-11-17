@@ -36,10 +36,10 @@ export function generateStaticParams() {
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
   const p = getProviderBySlug(slug);
-  if (!p) return { title: "Provider not found | SmartDrugDiscovery" };
+  if (!p) return { title: "Provider not found" };
   const description = p.description.length > 160 ? `${p.description.slice(0, 157).trimEnd()}...` : p.description;
   return {
-    title: `${p.name}: ${categoryLabel(p.category)} | SmartDrugDiscovery`,
+    title: `${p.name}: ${categoryLabel(p.category)}`,
     description,
     openGraph: { title: p.name, description },
   };

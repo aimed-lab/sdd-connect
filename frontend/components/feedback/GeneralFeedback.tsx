@@ -210,7 +210,7 @@ export default function GeneralFeedback() {
           onClick={() => setOpen(true)}
           aria-label="Give feedback"
           style={{ bottom: `${buttonBottom}px`, height: `${BUTTON_PX}px` }}
-          className="fixed right-6 max-sm:right-5 z-[55] px-4 max-sm:px-0 max-sm:justify-center max-sm:!h-10 max-sm:!w-10 max-sm:!bottom-[calc(16px+var(--fb-clear,0px))] rounded-full bg-surface-container-lowest text-on-background border border-outline-variant/50 shadow-lg flex items-center gap-2 hover:bg-surface-container-low transition-colors"
+          className="fixed right-6 max-sm:right-5 z-[55] px-4 max-sm:px-0 max-sm:justify-center max-sm:!h-11 max-sm:!w-11 max-sm:!bottom-[calc(16px+var(--fb-clear,0px))] rounded-full bg-surface-container-lowest text-on-background border border-outline-variant/50 shadow-lg flex items-center gap-2 hover:bg-surface-container-low transition-colors"
         >
           <span className="material-symbols-outlined text-[22px] max-sm:text-[20px]">edit_note</span>
           <span className="font-label-sm text-label-sm max-sm:hidden">Feedback</span>

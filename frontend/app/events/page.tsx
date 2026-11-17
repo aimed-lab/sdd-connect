@@ -1,5 +1,5 @@
 // Events: /events. Two sections (ids conferences, contests) that the home map links to.
-// The lists live in lib/events.ts. Server component. Not in the top nav.
+// The lists live in lib/events.ts. Server component. In the top nav and the side menu.
 
 import Link from "next/link";
 import SectionHeading from "@/components/explore/SectionHeading";

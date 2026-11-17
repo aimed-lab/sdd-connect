@@ -16,7 +16,7 @@ import { getAllProviders } from "@/lib/server/providers/providers";
 export const dynamic = "force-dynamic"; // the sign-in state decides what the forms show
 
 export const metadata: Metadata = {
-  title: "Find a service provider | SmartDrugDiscovery",
+  title: "Find a service provider",
   description:
     "Chemistry, biology, AI, manufacturing and reagent companies met at BioTechX Europe 2026, with what they offer and how to reach them.",
 };

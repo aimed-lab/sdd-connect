@@ -24,6 +24,8 @@ import CreatePostForm from "@/components/collaborate/CreatePostForm";
 import { getCurrentUser } from "@/lib/auth";
 import { getCommunityBySlug } from "@/lib/server/communities";
 
+export const metadata = { title: "Create a collaboration post" };
+
 export const dynamic = "force-dynamic"; // depends on the session
 
 export default async function NewCollabPostPage({

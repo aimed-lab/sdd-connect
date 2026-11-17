@@ -78,6 +78,7 @@ test("My work and Discover: the items, in order", () => {
     ["Explore", "/explore", "Papers, trials and datasets"],
     ["Collaborate", "/collaborate", "Service providers and resources"],
     ["Promote", "/promote", "Share a paper or a result"],
+    ["Events", "/events", "Conferences and contests"],
     ["Communities", "/communities", "Researchers in your area"],
     ["CollaboFest 2026", "/programs/colabofest-2026", "Timeline and finalists"],
   ]);

@@ -28,6 +28,7 @@ export const DISCOVER: MenuItem[] = [
   { label: "Explore", href: "/explore", icon: "travel_explore", description: "Papers, trials and datasets" },
   { label: "Collaborate", href: "/collaborate", icon: "handshake", description: "Service providers and resources" },
   { label: "Promote", href: "/promote", icon: "campaign", description: "Share a paper or a result" },
+  { label: "Events", href: "/events", icon: "event", description: "Conferences and contests" },
   { label: "Communities", href: "/communities", icon: "groups", description: "Researchers in your area" },
   { label: "CollaboFest 2026", href: "/programs/colabofest-2026", icon: "emoji_events", description: "Timeline and finalists" },
 ];

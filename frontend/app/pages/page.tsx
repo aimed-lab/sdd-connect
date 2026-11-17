@@ -13,7 +13,7 @@ import { formatDay } from "@/lib/server/pages/pageViewHelpers";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
-export const metadata = { title: "Your wiki · SmartDrugDiscovery" };
+export const metadata = { title: "Your wiki" };
 
 const ROLE_LABEL = { owner: "Owner", editor: "Editor", viewer: "Viewer" } as const;
 

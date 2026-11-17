@@ -18,7 +18,7 @@ import InboxList from "@/components/inbox/InboxList";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
-export const metadata = { title: "Inbox · SDD Navigator" };
+export const metadata = { title: "Inbox" };
 
 export default async function InboxPage() {
   const user = await getCurrentUser();

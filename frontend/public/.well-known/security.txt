@@ -1,0 +1,5 @@
+# Please report security issues privately through GitHub's advisory form.
+Contact: https://github.com/aimed-lab/sdd-connect/security/advisories/new
+Expires: 2027-11-01T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://connect.smartdrugdiscovery.org/.well-known/security.txt

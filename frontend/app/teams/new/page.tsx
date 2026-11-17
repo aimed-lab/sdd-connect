@@ -9,7 +9,7 @@ import CreateTeamForm from "@/components/teams/CreateTeamForm";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
-export const metadata = { title: "Create a team · SmartDrugDiscovery" };
+export const metadata = { title: "Create a team" };
 
 export default async function NewTeamPage({
   searchParams,
