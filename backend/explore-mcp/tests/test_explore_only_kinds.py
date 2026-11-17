@@ -3,8 +3,9 @@ tests/test_explore_only_kinds.py — the optional `only_kinds` restriction on ex
 
 A user who picks a scope ("Grants") must get THAT source queried with their text,
 even when the LLM router would not have chosen it. No network, no Groq: the
-per-source functions are stubbed, and the scope/route steps are made to explode
-if they are ever reached.
+per-source functions are stubbed, the router is made to explode if it is ever
+reached, and the scope extraction raises (a Groq outage), so these also cover the
+deterministic fallback.
 """
 
 from __future__ import annotations
@@ -46,10 +47,13 @@ def stubs(monkeypatch):
     monkeypatch.setattr(te, "search_tools_async", make("search_tools", "tool"))
     monkeypatch.setattr(te, "search_datasets_async", make("search_datasets", "dataset"))
 
-    def boom(*a, **k):
-        raise AssertionError("scope extraction / routing must not run for only_kinds")
+    def outage(*a, **k):
+        raise RuntimeError("LLM unavailable")
 
-    monkeypatch.setattr(te, "_extract_scope", boom)
+    def boom(*a, **k):
+        raise AssertionError("routing must not run for only_kinds")
+
+    monkeypatch.setattr(te, "_extract_scope", outage)
     monkeypatch.setattr(te, "_choose_tools", boom)
     return calls
 
