@@ -91,7 +91,7 @@ from starlette.responses import JSONResponse
 import prewarm
 from cache import cache as _cache
 from response import trim_explore_result, trim_items
-from tools.explore import explore_async, normalize_only_kinds
+from tools.explore import explore_async, normalize_only_kinds, normalize_source_filters
 from tools.fetch_github_repo import fetch_github_repo_async
 from tools.find_provider import (
     classify_checklist_item_async,
@@ -670,6 +670,9 @@ async def explore_http(request):
     # text as the query (no routing). Absent/empty/unknown -> normal behaviour.
     raw_only = body.get("only_kinds") if isinstance(body, dict) else None
     only_kinds = normalize_only_kinds(raw_only) or None
+    # Optional per-source filters (grant_open_only, grant_agencies, grant_sort,
+    # trial_location); see normalize_source_filters. Absent -> unchanged.
+    source_filters = normalize_source_filters(body) if isinstance(body, dict) else {}
     try:
         # trim_* only on egress — the cached copy keeps its full `raw` so the
         # citation graph stays rebuildable server-side (see response.py).
@@ -678,6 +681,7 @@ async def explore_http(request):
                 await explore_async(
                     input_text or "", scope_terms, since_year, status_filter,
                     **({"only_kinds": only_kinds} if only_kinds else {}),
+                    **({"source_filters": source_filters} if source_filters else {}),
                 )
             )
         )

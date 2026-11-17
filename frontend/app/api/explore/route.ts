@@ -51,6 +51,9 @@ export async function POST(req: Request) {
   let sinceYear: number | undefined;
   let statusFilter: string[] | undefined;
   let onlyKinds: string[] | undefined;
+  // Optional per-source filters, forwarded as-is; the backend validates them
+  // (grant_open_only, grant_agencies, grant_sort, trial_location).
+  const sourceFilters: Record<string, unknown> = {};
   try {
     const body = await req.json();
     if (body && typeof body.input === "string") input = body.input;
@@ -68,6 +71,15 @@ export async function POST(req: Request) {
     if (body && Array.isArray(body.only_kinds)) {
       const kinds = body.only_kinds.filter((k: unknown): k is string => typeof k === "string" && k.trim() !== "");
       if (kinds.length > 0) onlyKinds = kinds;
+    }
+    if (body && body.grant_open_only === true) sourceFilters.grant_open_only = true;
+    if (body && Array.isArray(body.grant_agencies)) {
+      const agencies = body.grant_agencies.filter((a: unknown): a is string => typeof a === "string" && a.trim() !== "");
+      if (agencies.length > 0) sourceFilters.grant_agencies = agencies;
+    }
+    if (body && body.grant_sort === "deadline") sourceFilters.grant_sort = "deadline";
+    if (body && typeof body.trial_location === "string" && body.trial_location.trim() !== "") {
+      sourceFilters.trial_location = body.trial_location.trim();
     }
   } catch {
     // malformed body -> treat as empty input (backend serves the default feed)
@@ -100,6 +112,7 @@ export async function POST(req: Request) {
     if (sinceYear !== undefined) payload.since_year = sinceYear;
     if (statusFilter !== undefined) payload.status_filter = statusFilter;
     if (onlyKinds !== undefined && input.trim()) payload.only_kinds = onlyKinds;
+    if (input.trim()) Object.assign(payload, sourceFilters);
     const res = await fetch(`${EXPLORE_API_URL}/api/explore`, {
       method: "POST",
       headers: exploreBackendHeaders({ "Content-Type": "application/json" }),

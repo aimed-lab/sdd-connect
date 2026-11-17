@@ -6,12 +6,19 @@ Square, ...). Free, no API key.
 the newest first. Preprints expose no ranking metric (no citation graph worth
 trusting this early), so signal stays None.
 
+A query that comes back with no hits is retried ONCE with its quotes dropped
+and its words ANDed ('"KRAS G12C"' -> 'KRAS AND G12C'), so a phrase that
+Europe PMC tokenises differently (e.g. titles written "KRAS<sup>G12C</sup>")
+still finds the preprints that mention both words.
+
 `raw` is a small first-party dict (server, authors, doi) — response.py lists
 "europepmc" in _INTERNAL_SOURCES so it reaches the frontend untrimmed.
 """
 
 from __future__ import annotations
 
+import logging
+import re
 from urllib.parse import quote
 
 import httpx
@@ -21,19 +28,38 @@ from models import Item
 
 from .base import filter_quality, get_json, to_iso
 
+logger = logging.getLogger(__name__)
+
 _SEARCH = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
 
 
-async def fetch_preprints(client: httpx.AsyncClient, term: str, cap: int) -> list[Item]:
+def relaxed_query(term: str) -> str:
+    """Quotes dropped and every word ANDed; existing AND operators kept."""
+    words = [w for w in re.split(r"\s+", term.replace('"', " ")) if w and w.upper() != "AND"]
+    return " AND ".join(words)
+
+
+async def _search(client: httpx.AsyncClient, term: str, cap: int) -> list[dict]:
     query = f"{term} AND SRC:PPR"
     url = (
         f"{_SEARCH}?format=json&resultType=lite&pageSize={cap}"
         f"&sort=P_PDATE_D%20desc&query={quote(query, safe=':')}"
     )
     data = await get_json(client, url)
+    results = ((data or {}).get("resultList") or {}).get("result") or []
+    if not results:
+        logger.info("europepmc: 0 results (hitCount=%s) for query=%r", (data or {}).get("hitCount"), query)
+    return results
+
+
+async def fetch_preprints(client: httpx.AsyncClient, term: str, cap: int) -> list[Item]:
+    results = await _search(client, term, cap)
+    relaxed = relaxed_query(term)
+    if not results and relaxed and relaxed != term.strip():
+        results = await _search(client, relaxed, cap)
 
     items: list[Item] = []
-    for r in ((data or {}).get("resultList") or {}).get("result") or []:
+    for r in results:
         title = (r.get("title") or "").strip()
         if not title:
             continue

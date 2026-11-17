@@ -18,6 +18,15 @@ OpenAlex's. The full study record is NOT kept in `raw` — nothing reads it and
 keeping the whole ~5-15KB record per trial in the cache/response would be pure
 waste once the fields actually used are named explicitly.
 
+LOCATIONS / ELIGIBILITY / OUTCOMES — read from the same response, capped so the
+cached payload stays small: the unique site states (at most 30), at most 5
+sites (those matching a `location` filter first), an eligibility excerpt of
+about 300 characters ending at a sentence, and at most 3 primary outcomes.
+Contacts are deliberately not copied (names, phones and emails).
+
+LOCATION FILTER — `location`, when given, is sent as `query.locn` (e.g.
+"Alabama"), which ClinicalTrials.gov matches against site locations.
+
 STATUS FILTER — `status_filter`, when given, is sent as `filter.overallStatus`
 (comma-joined for multiple values, e.g. "TERMINATED,WITHDRAWN"), confirmed live
 against the v2 API to filter server-side, not fetched-then-discarded client-side.
@@ -25,6 +34,7 @@ against the v2 API to filter server-side, not fetched-then-discarded client-side
 
 from __future__ import annotations
 
+import re
 from urllib.parse import quote
 
 import httpx
@@ -37,12 +47,23 @@ from .base import filter_quality, get_json, to_iso_or_none
 _SUMMARY_LIMIT = 220
 
 
+_ELIGIBILITY_LIMIT = 300
+_MAX_SITES = 5
+_MAX_STATES = 30
+_MAX_OUTCOMES = 3
+_OUTCOME_LIMIT = 200
+
+
 def _clip_words(text: str, limit: int = _SUMMARY_LIMIT) -> str:
-    """Shorten to at most `limit` characters, ending on a word boundary with an
+    """Shorten to at most `limit` characters, ending at a sentence when one
+    ends in the second half of the window, else on a word boundary with an
     ellipsis, so a summary never ends mid-word."""
-    text = text.strip()
+    text = re.sub(r"\s+", " ", text).strip()
     if len(text) <= limit:
         return text
+    sentence_end = max(text.rfind(". ", 0, limit), text.rfind("; ", 0, limit))
+    if sentence_end > limit // 2:
+        return text[: sentence_end + 1]
     cut = text[: limit - 1]
     space = cut.rfind(" ")
     if space > limit // 2:
@@ -57,9 +78,59 @@ def _interventions(arms_module: dict) -> list[dict]:
     return out
 
 
+def _eligibility(module: dict) -> dict | None:
+    criteria = (module.get("eligibilityCriteria") or "").replace("*", " ")
+    out = {
+        "min_age": module.get("minimumAge"),
+        "max_age": module.get("maximumAge"),
+        "sex": module.get("sex"),
+        "healthy_volunteers": module.get("healthyVolunteers"),
+        "criteria_excerpt": _clip_words(criteria, _ELIGIBILITY_LIMIT) or None,
+    }
+    out = {k: v for k, v in out.items() if v is not None}
+    return out or None
+
+
+def _locations(module: dict, location: str | None) -> tuple[list[str] | None, list[dict] | None, int]:
+    locs = [l for l in (module.get("locations") or []) if isinstance(l, dict)]
+    states: list[str] = []
+    for l in locs:
+        st = l.get("state")
+        if st and st not in states and len(states) < _MAX_STATES:
+            states.append(st)
+    wanted = (location or "").strip().lower()
+
+    def matches(l: dict) -> bool:
+        return bool(wanted) and any(
+            wanted in (l.get(k) or "").lower() for k in ("state", "city", "country", "facility")
+        )
+
+    ordered = [l for l in locs if matches(l)] + [l for l in locs if not matches(l)]
+    sites = [
+        {k: v for k, v in {
+            "facility": l.get("facility"), "city": l.get("city"), "state": l.get("state"),
+            "country": l.get("country"), "status": l.get("status"),
+        }.items() if v}
+        for l in ordered[:_MAX_SITES]
+    ]
+    return states or None, sites or None, len(locs)
+
+
+def _primary_outcomes(module: dict) -> list[dict] | None:
+    out = []
+    for o in (module.get("primaryOutcomes") or [])[:_MAX_OUTCOMES]:
+        if not isinstance(o, dict) or not o.get("measure"):
+            continue
+        entry = {"measure": _clip_words(o["measure"], _OUTCOME_LIMIT)}
+        if o.get("timeFrame"):
+            entry["time_frame"] = _clip_words(o["timeFrame"], _OUTCOME_LIMIT)
+        out.append(entry)
+    return out or None
+
+
 async def fetch_trials(
     client: httpx.AsyncClient, term: str, cap: int, status_filter: list[str] | None = None,
-    condition_only: bool = False, extra_term: str | None = None,
+    condition_only: bool = False, extra_term: str | None = None, location: str | None = None,
 ) -> list[Item]:
     # `extra_term` (only with condition_only): sent as query.term ALONGSIDE
     # query.cond, e.g. cond=pancreatic cancer + term=KRAS. (Named extra_term
@@ -77,6 +148,8 @@ async def fetch_trials(
         url += f"&query.term={quote(extra_term)}"
     if status_filter:
         url += f"&filter.overallStatus={quote(','.join(status_filter))}"
+    if location and location.strip():
+        url += f"&query.locn={quote(location.strip())}"
     data = await get_json(client, url)
 
     items: list[Item] = []
@@ -88,6 +161,8 @@ async def fetch_trials(
         design = proto.get("designModule") or {}
         arms = proto.get("armsInterventionsModule") or {}
         sponsors = proto.get("sponsorCollaboratorsModule") or {}
+
+        states, sites, site_count = _locations(proto.get("contactsLocationsModule") or {}, location)
 
         nct_id = ident.get("nctId") or ""
         if not nct_id:   # drop studies with no NCT id
@@ -124,6 +199,12 @@ async def fetch_trials(
                     "results_posted": bool(status.get("resultsFirstPostDateStruct")),
                     "conditions": proto.get("conditionsModule", {}).get("conditions"),
                     "brief_summary": full_summary or None,
+                    "phases": design.get("phases") or None,
+                    "eligibility": _eligibility(proto.get("eligibilityModule") or {}),
+                    "primary_outcomes": _primary_outcomes(proto.get("outcomesModule") or {}),
+                    "location_states": states,
+                    "sites": sites,
+                    "site_count": site_count,
                 },
             )
         )

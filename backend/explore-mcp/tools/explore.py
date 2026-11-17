@@ -894,6 +894,7 @@ async def _capped(tool: str, query: str, awaitable):
 async def _execute(
     chosen: list[str], scope: dict, since_year: int | None = None,
     status_filter: list[str] | None = None, papers_include_methods: bool = False,
+    source_filters: dict | None = None,
 ) -> list[dict]:
     tasks = []
     specs: list[tuple[str, str, str]] = []  # (tool, kind, display_query)
@@ -954,7 +955,9 @@ async def _execute(
             # a scope disease or gene. No disease/gene (methods fallback) -> no
             # filter, as before.
             mentions = [t.strip() for t in (scope.get("diseases") or []) + (scope.get("genes") or []) if t and t.strip()]
-            tasks.append(search_grants_async(query, _NET_LIMIT, must_mention=mentions or None))
+            tasks.append(search_grants_async(
+                query, _NET_LIMIT, must_mention=mentions or None, **_grant_kwargs(source_filters)
+            ))
         elif name == "search_trials":
             # The query came from the `diseases` slice (the only primary slice)
             # exactly when scope has diseases; otherwise it is the methods
@@ -969,14 +972,15 @@ async def _execute(
                 # condition-only ones (see search_trials_with_gene_async).
                 tasks.append(
                     search_trials_with_gene_async(
-                        query, genes[0], _NET_LIMIT, status_filter=status_filter or None
+                        query, genes[0], _NET_LIMIT, status_filter=status_filter or None,
+                        **_trial_kwargs(source_filters),
                     )
                 )
             else:
                 tasks.append(
                     search_trials_async(
                         query, _NET_LIMIT, status_filter=status_filter or None,
-                        condition_only=condition_only,
+                        condition_only=condition_only, **_trial_kwargs(source_filters),
                     )
                 )
         else:
@@ -1043,6 +1047,64 @@ async def _execute(
 _TOOL_FOR_KIND: dict[str, str] = {kind: tool for tool, kind in _KINDS.items()}
 
 
+_GRANT_SORTS = {"deadline"}
+
+
+def normalize_source_filters(raw) -> dict:
+    """Caller-supplied per-source filters -> a small dict with only the keys
+    that are set. All optional, all UI-only (never derived from free text):
+      grant_open_only: bool        posted grants only (no forecasts)
+      grant_agencies:  [str]       Grants.gov agency codes/aliases ("NIH", "NSF", "HHS-NIH11")
+      grant_sort:      "deadline"  soonest close date first
+      trial_location:  str         ClinicalTrials.gov query.locn (e.g. "Alabama")
+    Anything malformed is dropped, so a bad value can never change results."""
+    if not isinstance(raw, dict):
+        return {}
+    out: dict = {}
+    if raw.get("grant_open_only") is True:
+        out["grant_open_only"] = True
+    agencies = raw.get("grant_agencies")
+    if isinstance(agencies, str):
+        agencies = [agencies]
+    if isinstance(agencies, (list, tuple)):
+        cleaned = sorted({str(a).strip().upper() for a in agencies if str(a).strip()})[:10]
+        if cleaned:
+            out["grant_agencies"] = cleaned
+    if raw.get("grant_sort") in _GRANT_SORTS:
+        out["grant_sort"] = raw["grant_sort"]
+    location = raw.get("trial_location")
+    if isinstance(location, str) and location.strip():
+        out["trial_location"] = " ".join(location.split())[:100]
+    return out
+
+
+def _filters_key(filters: dict | None) -> str:
+    if not filters:
+        return ""
+    parts = [
+        f"{k}={','.join(v) if isinstance(v, list) else str(v).lower()}"
+        for k, v in sorted(filters.items())
+    ]
+    return ":f[" + ";".join(parts) + "]"
+
+
+def _grant_kwargs(filters: dict | None) -> dict:
+    filters = filters or {}
+    kw: dict = {}
+    if filters.get("grant_open_only"):
+        kw["open_only"] = True
+    if filters.get("grant_agencies"):
+        kw["agencies"] = filters["grant_agencies"]
+    if filters.get("grant_sort"):
+        kw["sort"] = filters["grant_sort"]
+    return kw
+
+
+def _trial_kwargs(filters: dict | None) -> dict:
+    location = (filters or {}).get("trial_location")
+    return {"location": location} if location else {}
+
+
 def normalize_only_kinds(raw) -> list[str]:
     """Caller-supplied `only_kinds` -> a sorted, de-duplicated list of KNOWN kinds
     (paper, preprint, trial, ...). Anything unknown is dropped; [] means "no
@@ -1054,7 +1116,7 @@ def normalize_only_kinds(raw) -> list[str]:
 
 async def _execute_only(
     kinds: list[str], text: str, since_year: int | None = None,
-    status_filter: list[str] | None = None,
+    status_filter: list[str] | None = None, source_filters: dict | None = None,
 ) -> list[dict]:
     """Run ONLY the sources for `kinds`, each with the typed text as its query.
 
@@ -1077,8 +1139,11 @@ async def _execute_only(
             awaitables.append(
                 search_trials_async(
                     text, _NET_LIMIT, status_filter=status_filter or None, condition_only=False,
+                    **_trial_kwargs(source_filters),
                 )
             )
+        elif name == "search_grants" and _grant_kwargs(source_filters):
+            awaitables.append(search_grants_async(text, _NET_LIMIT, **_grant_kwargs(source_filters)))
         else:
             awaitables.append(_dispatch(name, text))
 
@@ -1112,9 +1177,11 @@ async def _execute_only(
 
 async def _explore_only_uncached(
     input_text: str, kinds: list[str], since_year: int | None, status_filter: list[str] | None,
+    source_filters: dict | None = None,
 ) -> dict:
     text = input_text.strip()
-    sections = await _execute_only(kinds, text, since_year, status_filter)
+    extra = {"source_filters": source_filters} if source_filters else {}
+    sections = await _execute_only(kinds, text, since_year, status_filter, **extra)
     return {
         "input": input_text,
         "scope": {**_EMPTY_SCOPE, "topics": [text], "is_default": False, "is_personalized": False},
@@ -1126,7 +1193,7 @@ async def _explore_only_uncached(
 
 async def _explore_uncached(
     input_text: str, scope_terms: list[str] | None = None, since_year: int | None = None,
-    status_filter: list[str] | None = None,
+    status_filter: list[str] | None = None, source_filters: dict | None = None,
 ) -> dict:
     """The real orchestration: extract scope, route, fan out, assemble."""
     if not (input_text or "").strip():
@@ -1188,6 +1255,8 @@ async def _explore_uncached(
     # Extra kwarg only when papers were forced in, so the normal call shape is
     # unchanged for every other caller/test double of _execute.
     extra = {"papers_include_methods": True} if forced_papers else {}
+    if source_filters:
+        extra["source_filters"] = source_filters
     exec_scope = {**scope, "_raw_input": input_text} if (input_text or "").strip() else scope
     sections = await _execute(chosen, exec_scope, since_year, status_filter, **extra)
     return {
@@ -1199,9 +1268,17 @@ async def _explore_uncached(
     }
 
 
+def _has_failed_section(result: dict) -> bool:
+    """A section that timed out or whose source raised: don't pin the whole
+    response for the full TTL (an empty preprint section stuck for an hour was
+    issue #66)."""
+    return any(s.get("timed_out") or s.get("error") for s in result.get("sections", []))
+
+
 async def explore_async(
     input_text: str, scope_terms: list[str] | None = None, since_year: int | None = None,
     status_filter: list[str] | None = None, only_kinds: list[str] | None = None,
+    source_filters: dict | None = None,
 ) -> dict:
     """Async orchestration core (used by the MCP server), cached end-to-end.
 
@@ -1232,6 +1309,11 @@ async def explore_async(
     that changes which real-world results are shown is worth a control click.
     Folded into the cache key below, same as since_year.
 
+    `source_filters` (see normalize_source_filters): optional per-source
+    filters for grants (open only, agency, deadline sort) and trials (site
+    location). UI-only like status_filter, folded into the cache key, and
+    omitted entirely when empty so the unfiltered path is unchanged.
+
     Blank / whitespace-only input skips LLM extraction and routing entirely and
     serves the landing feed: a fixed tool set, with scope.is_default=true so the
     frontend knows this is the blank-state feed. `scope_terms` personalizes THAT
@@ -1260,6 +1342,9 @@ async def explore_async(
     """
     blank = not (input_text or "").strip()
     terms = _clean_terms(scope_terms) if blank else []
+    source_filters = {} if blank else normalize_source_filters(source_filters)
+    fkey = _filters_key(source_filters)
+    fextra = {"source_filters": source_filters} if source_filters else {}
 
     kinds = [] if blank else normalize_only_kinds(only_kinds)
     if kinds:
@@ -1268,12 +1353,13 @@ async def explore_async(
             only_key += f":since{since_year}"
         if status_filter:
             only_key += f":status{','.join(status_filter)}"
+        only_key += fkey
         only_result = await cache.get_or_compute(
             normalize_key(only_key, input_text),
-            lambda: _explore_only_uncached(input_text, kinds, since_year, status_filter),
+            lambda: _explore_only_uncached(input_text, kinds, since_year, status_filter, **fextra),
             TTL_TOPIC, STALE_TOPIC,
         )
-        if any(s.get("timed_out") for s in only_result.get("sections", [])):
+        if _has_failed_section(only_result):
             await cache.expire_soon(normalize_key(only_key, input_text))
         return only_result
 
@@ -1283,17 +1369,18 @@ async def explore_async(
         base_key += f":since{since_year}"
     if status_filter:
         base_key += f":status{','.join(status_filter)}"
+    base_key += fkey
     key = normalize_key(base_key, key_terms)
     ttl, stale = (
         (TTL_DEFAULT_FEED, STALE_DEFAULT_FEED) if blank else (TTL_TOPIC, STALE_TOPIC)
     )
     result = await cache.get_or_compute(
         key,
-        lambda: _explore_uncached(input_text, terms, since_year, status_filter),
+        lambda: _explore_uncached(input_text, terms, since_year, status_filter, **fextra),
         ttl, stale,
     )
-    if any(s.get("timed_out") for s in result.get("sections", [])):
-        # A section timed out: don't pin this page for the full TTL while its
+    if _has_failed_section(result):
+        # A section timed out or failed: don't pin this page for the full TTL while its
         # fetch finishes in the background (see _capped).
         await cache.expire_soon(key)
     return result
