@@ -9,7 +9,7 @@
 //   • READS    — getCurrentUser / getSession / requireCurrentUser / getDb.
 //                Used by lib/server/* and server components to answer "who is
 //                this and what may they touch".
-//   • SESSION  — signInWithEmail / signUp / signOut / confirmEmailLink.
+//   • SESSION  — signInWithSSO / signOut / confirmEmailLink.
 //                Used ONLY by app/auth/actions.ts, which the login and signup
 //                pages call. No page imports this module directly (it is
 //                server-only) and no page imports Supabase.
@@ -22,10 +22,10 @@
 // │ redirect. auth.uid() and every RLS policy / SECURITY DEFINER function are  │
 // │ untouched — they were never coupled to *how* the session got established. │
 // │                                                                           │
-// │ signInWithEmail / signUp / requestPasswordReset / updatePassword /         │
-// │ confirmEmailLink still exist below and still work, but nothing in the UI   │
-// │ calls them anymore — SSO is the only reachable sign-in path. Left in place │
-// │ deliberately (not deleted) in case a break-glass path is ever needed.      │
+// │ Email/password sign-in, sign-up and password reset were REMOVED on         │
+// │ 2026-11-17 (security advisory GHSA-6g2g-qm7q-f8f5): the Supabase Email     │
+// │ provider is off and SSO is the only sign-in path. Do not reintroduce a     │
+// │ local password flow — see the SmartDrugDiscovery Authentication Guide.     │
 // │                                                                           │
 // │ A FUTURE swap off Supabase Auth entirely still only touches this file:     │
 // │ callers depend on the AuthUser / AuthOutcome shapes and on                 │
@@ -209,73 +209,6 @@ export async function signInWithSSO(
   return { ok: true, url: data.url };
 }
 
-/** Sign in with email + password. Sets the session cookies as a side effect. */
-export async function signInWithEmail(
-  email: string,
-  password: string
-): Promise<AuthOutcome> {
-  const supabase = await getSessionClient();
-  if (!supabase) throw new ServerConfigError();
-
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) return { ok: false, error: friendlyAuthError(error.message) };
-
-  return { ok: true };
-}
-
-/**
- * Register a new account and sign the user straight in.
- *
- * ONE STEP, NO EMAIL. Email confirmation is disabled for this project, so
- * signUp() returns a session immediately and the cookies are set here. There is
- * no confirmation link, no "check your email" screen, and the caller redirects
- * as soon as this resolves.
- *
- * The public.users profile row is NOT written here — the `on_auth_user_created`
- * trigger (database/schema.sql) mirrors the new auth user into public.users with
- * SECURITY DEFINER rights. That stays the right place for it: the trigger runs
- * inside the same insert regardless of whether a session exists, so profile
- * creation never depends on the confirmation setting.
- */
-export async function signUp(email: string, password: string): Promise<AuthOutcome> {
-  const supabase = await getSessionClient();
-  if (!supabase) throw new ServerConfigError();
-
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    // Read by handle_new_user() to seed users.name without a second write.
-    options: { data: { name: email.split("@")[0] } },
-  });
-
-  if (error) return { ok: false, error: friendlyAuthError(error.message) };
-
-  // Supabase does not error on a duplicate signup — it returns a decoy user with
-  // an EMPTY identities array so an attacker can't enumerate registered emails.
-  // With confirmation off there is no email to swallow the ambiguity, so say
-  // plainly that the address is taken; the alternative is a "success" that
-  // silently fails to sign anyone in.
-  if (data.user && (data.user.identities?.length ?? 0) === 0) {
-    return { ok: false, error: "An account with that email already exists. Try logging in." };
-  }
-
-  // No session means the project's "Confirm email" setting is back ON. Rather
-  // than redirect to a page that will bounce the user straight back to /login,
-  // fail loudly — this is a configuration problem, not a user error.
-  if (!data.session) {
-    console.error(
-      "signUp returned no session — Supabase 'Confirm email' appears to be enabled. " +
-        "Disable it (Authentication → Providers → Email) or restore the confirmation flow."
-    );
-    return {
-      ok: false,
-      error: "Account creation isn't fully configured on this server. Please contact support.",
-    };
-  }
-
-  return { ok: true };
-}
-
 /** Sign out and clear the session cookies. */
 export async function signOut(): Promise<void> {
   const supabase = await getSessionClient();
@@ -283,10 +216,9 @@ export async function signOut(): Promise<void> {
   await supabase.auth.signOut();
 }
 
-/** Complete an email-confirmation link. Handles both link styles Supabase
- *  emits — PKCE (`?code=`) and the token-hash template (`?token_hash=&type=`) —
- *  because which one arrives depends on the project's email template, not on
- *  anything this app controls. */
+/** Finish a PKCE code exchange — used by the SSO return leg (/auth/callback).
+ *  The token-hash branch is kept for Supabase-issued links (e.g. an admin
+ *  magic link), not for any password flow. */
 export async function confirmEmailLink(params: {
   code?: string | null;
   tokenHash?: string | null;
@@ -312,54 +244,6 @@ export async function confirmEmailLink(params: {
   }
 
   return { ok: false, error: "That confirmation link is incomplete." };
-}
-
-// ── password reset ───────────────────────────────────────────────────────────
-//
-// SSO NOTE: both of these disappear under Oracle/UAB SSO — an institutional IdP
-// owns credentials, and "forgot password" becomes a link out to the IdP's own
-// reset page. They live here so that removal is a change to this file plus the
-// deletion of two routes, not an audit of every page.
-
-/** Send a password-reset email. Always reports success, even for an unknown
- *  address: telling a caller "no account with that email" turns this endpoint
- *  into a free user-enumeration oracle. */
-export async function requestPasswordReset(
-  email: string,
-  redirectTo?: string
-): Promise<AuthOutcome> {
-  const supabase = await getSessionClient();
-  if (!supabase) throw new ServerConfigError();
-
-  const { error } = await supabase.auth.resetPasswordForEmail(
-    email,
-    redirectTo ? { redirectTo } : undefined
-  );
-
-  // Rate limiting is the one failure worth surfacing — the user can act on it
-  // ("wait and retry") and it does not reveal whether the account exists.
-  if (error && /rate limit|too many/i.test(error.message)) {
-    return { ok: false, error: friendlyAuthError(error.message) };
-  }
-  if (error) console.error("requestPasswordReset failed", error.message);
-
-  return { ok: true };
-}
-
-/** Set a new password for the CURRENT session. Requires the recovery session
- *  established by the emailed link (or a normal signed-in session). */
-export async function updatePassword(newPassword: string): Promise<AuthOutcome> {
-  const supabase = await getSessionClient();
-  if (!supabase) throw new ServerConfigError();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new UnauthorizedError();
-
-  const { error } = await supabase.auth.updateUser({ password: newPassword });
-  if (error) return { ok: false, error: friendlyAuthError(error.message) };
-  return { ok: true };
 }
 
 // ── account deletion ─────────────────────────────────────────────────────────
