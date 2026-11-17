@@ -321,3 +321,27 @@ def test_gate_accepts_aliases():
     groups = qi.gate_terms(intent.scope, intent)
     assert qi.mentions_any({"title": "A study in ALS", "summary": ""}, groups)
     assert not qi.mentions_any({"title": "OCD study", "summary": ""}, groups)
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("drug discovery", "drug discovery"),
+    ("drug repurposing", "drug repurposing"),
+    ("target discovery", "target discovery"),
+    ("drug development papers", "drug development"),
+    ("recruiting drug discovery trials", "drug discovery"),
+    ("KRAS drugs", "KRAS"),
+    ("drugs for obesity", "obesity"),
+])
+def test_parser_keeps_drug_as_part_of_a_field_name(text, expected):
+    assert qi.parse(text).core == expected
+
+
+def test_no_llm_path_searches_drug_discovery_as_typed(env, monkeypatch):
+    def down(text):
+        raise RuntimeError("groq down")
+
+    monkeypatch.setattr(te, "_extract_scope", down)
+    result = _run("drug discovery", ["paper"])
+    assert result["interpreted"]["scope_source"] == "deterministic"
+    assert result["interpreted"]["entities"] == ["drug discovery"]
+    assert _section(result, "paper")["query"] == "drug discovery"
