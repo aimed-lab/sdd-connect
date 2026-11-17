@@ -54,6 +54,7 @@ import {
 } from "@/lib/server/explore/exploreLayout";
 import InlineFeedback from "@/components/feedback/InlineFeedback";
 import { submitFeedbackAction } from "@/app/feedback/actions";
+import { streamExplore, type StreamingExplore } from "@/lib/server/explore/exploreStream";
 import type { ExploreItem, ExploreResponse, ExploreSection } from "@/types/explore";
 
 // Section kinds hidden from the feed for now (portal quick fixes). Hidden,
@@ -180,7 +181,7 @@ function SearchResults() {
   if (trialStatusParam) extraQs.trial_status = trialStatusParam;
   const projectQs = Object.keys(extraQs).length > 0 ? `?${new URLSearchParams(extraQs).toString()}` : "";
 
-  const [data, setData] = useState<ExploreResponse | null>(null);
+  const [data, setData] = useState<StreamingExplore | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   // ?category=<kind> opens that kind's tab once the results are in (the
@@ -211,9 +212,13 @@ function SearchResults() {
   // the original project context while ignoring their edit.
   const isFirstLoadRef = useRef(true);
 
-  // (Re)fetch whenever the routed topic changes.
+  // (Re)fetch whenever the routed topic changes. Sections stream in from
+  // /api/explore/stream and show as they arrive (#95); `loading` stays true
+  // until the last one, so the AI summary, tab counts and empty states wait
+  // for the whole result. Any stream failure falls back to /api/explore.
   useEffect(() => {
     let cancelled = false;
+    const ctl = new AbortController();
     const useProjectContext = isFirstLoadRef.current && !!projectId;
     isFirstLoadRef.current = false;
     setSelected(null);
@@ -221,6 +226,7 @@ function SearchResults() {
     (async () => {
       setLoading(true);
       setFailed(false);
+      setData(null);
       try {
         // A chosen scope queries just that source (backend `only_kinds`) instead
         // of relying on the router to pick it.
@@ -232,13 +238,26 @@ function SearchResults() {
               ...(statusFilter !== undefined ? { status_filter: statusFilter } : {}),
               ...(kinds ? { only_kinds: kinds } : {}),
             };
-        const res = await fetch("/api/explore", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        const json = (await res.json()) as ExploreResponse;
-        if (!cancelled) setData(json);
+        const streamed = await streamExplore(
+          body,
+          (partial) => {
+            if (!cancelled) setData(partial);
+          },
+          ctl.signal
+        );
+        if (cancelled) return;
+        if (streamed) {
+          setData(streamed);
+        } else {
+          const res = await fetch("/api/explore", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+            signal: ctl.signal,
+          });
+          const json = (await res.json()) as ExploreResponse;
+          if (!cancelled) setData(json);
+        }
       } catch {
         if (!cancelled) setFailed(true);
       } finally {
@@ -247,12 +266,17 @@ function SearchResults() {
     })();
     return () => {
       cancelled = true;
+      ctl.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- projectId is
     // read once via isFirstLoadRef, not meant to re-trigger this effect
   }, [topic, trialStatusParam, scope, retryNonce]);
 
   const sections = useMemo(() => visibleSections(data), [data]);
+  // Mid-stream: some sections are in, others still searching. Those that are
+  // in are shown; the rest keep a skeleton until they arrive.
+  const streaming = loading && sections.length > 0;
+  const pendingKinds = loading ? [...new Set(data?.pending_kinds ?? [])].filter((k) => !HIDDEN_SECTION_KINDS.has(k)) : [];
   const sectionOf = (kind: string) => sections.find((s) => s.kind === kind);
   const itemsOf = (kind: string): ExploreItem[] => sectionOf(kind)?.items ?? [];
   const totalItems = sections.reduce((n, s) => n + s.items.length, 0);
@@ -279,6 +303,7 @@ function SearchResults() {
   const backendError = !loading && (failed || data?.error === true);
   const emptyResult = !loading && !backendError && totalItems === 0 && timedOut.length === 0;
   const showError = backendError || emptyResult;
+  const showResults = !showError && (!loading || streaming);
 
   // Auto-capture: page_path + the query, tagged with which of the two
   // settled outcomes it was, once per distinct topic. Fires for BOTH —
@@ -506,7 +531,7 @@ function SearchResults() {
             )}
           </section>
         ))}
-        {(missing.empty.length > 0 || missing.failed.length > 0) && (
+        {!loading && (missing.empty.length > 0 || missing.failed.length > 0) && (
           <div className="rounded-xl bg-surface-container-low px-4 py-3 font-body-sm text-body-sm text-secondary" role="note">
             {missing.empty.length > 0 && (
               <p>
@@ -539,6 +564,14 @@ function SearchResults() {
   const selectedView = (kind: string) => {
     if (kind === "trial" && trialView === "landscape") return <div>{trialSection()}</div>;
     const section = sectionOf(kind);
+    if (!section && pendingKinds.includes(kind)) {
+      return (
+        <div className="space-y-4" role="status">
+          <p className="font-body-sm text-body-sm text-secondary">Still searching: {kindName(kind)}</p>
+          <BlockSkeleton className="h-64" />
+        </div>
+      );
+    }
     if (!section || section.items.length === 0) {
       const reason = kind === "trial" ? emptyReasonText(section?.empty_reason) : null;
       const note = kind === "trial" ? trialNote() : null;
@@ -685,7 +718,7 @@ function SearchResults() {
           )}
 
           {/* One tab row with counts, replacing the category chips. */}
-          {!loading && !showError && !scoped && (
+          {showResults && !scoped && (
             <div role="tablist" aria-label="Result types" className="flex gap-2 overflow-x-auto no-scrollbar pb-1 border-b border-outline-variant/30">
               {tabs.map((t) => {
                 const on = (selected ?? "all") === t.key;
@@ -728,7 +761,7 @@ function SearchResults() {
               </div>
             )}
 
-            {loading && (
+            {loading && !streaming && (
               <div className="space-y-10">
                 <BlockSkeleton className="h-40" />
                 <BlockSkeleton className="h-64" />
@@ -793,7 +826,19 @@ function SearchResults() {
               </div>
             )}
 
-            {!loading && !showError && (scoped ? scopedView() : selected === null ? allView() : selectedView(selected))}
+            {showResults && (scoped ? scopedView() : selected === null ? allView() : selectedView(selected))}
+
+            {streaming && !scoped && selected === null && pendingKinds.length > 0 && (
+              <div className="mt-10 space-y-4" role="status" aria-live="polite">
+                <p className="flex items-center gap-2 font-body-sm text-body-sm text-secondary">
+                  <span aria-hidden="true" className="inline-block h-4 w-4 shrink-0 rounded-full border-2 border-outline-variant/60 border-t-primary motion-safe:animate-spin" />
+                  Still searching: {listJoin(pendingKinds.map(kindName))}
+                </p>
+                {pendingKinds.map((k) => (
+                  <BlockSkeleton key={k} className="h-40" />
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

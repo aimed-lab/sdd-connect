@@ -1,18 +1,9 @@
 import { NextResponse } from "next/server";
-import { getCurrentUserInterests } from "@/lib/server/interests";
-import { getProject } from "@/lib/server/projects";
-import { buildProjectExploreQuery } from "@/lib/projectTypes";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
 import { cleanSectionTitles } from "@/lib/server/explore/exploreLayout";
-import { clientIp, createRateLimiter } from "@/lib/server/rateLimit";
-import {
-  EXPLORE_BODY_MAX_CHARS,
-  EXPLORE_MAX_PER_WINDOW,
-  RATE_LIMITED_MESSAGE,
-  SEARCH_WINDOW_MS,
-  parseExploreBody,
-  retryAfterHeaders,
-} from "@/lib/server/searchRequest";
+import { buildExplorePayload } from "@/lib/server/explore/explorePayload";
+import { createRateLimiter } from "@/lib/server/rateLimit";
+import { EXPLORE_MAX_PER_WINDOW, SEARCH_WINDOW_MS, retryAfterHeaders } from "@/lib/server/searchRequest";
 
 // Proxy for the Python explore backend. POST { input } -> the backend's
 // { input, scope, tools_called, reasoning, sections } JSON. The backend exposes
@@ -68,61 +59,19 @@ export const maxDuration = 60;
 const BACKEND_TIMEOUT_MS = 55_000;
 
 export async function POST(req: Request) {
-  if (limiter.limited(clientIp(req))) {
-    return NextResponse.json(
-      { sections: [], scope: {}, error: true, rate_limited: true, message: RATE_LIMITED_MESSAGE },
-      { status: 429, headers: retryAfterHeaders() }
-    );
-  }
-
-  if (Number(req.headers.get("content-length") ?? 0) > EXPLORE_BODY_MAX_CHARS) {
-    return NextResponse.json({ sections: [], scope: {}, error: true, message: "Request is too large." }, { status: 400 });
-  }
-  let raw = "";
-  try {
-    raw = await req.text();
-  } catch {
-    // unreadable body -> treat as empty input (backend serves the default feed)
-  }
-  // A chosen scope (only_kinds, e.g. "Grants"): the backend queries just these
-  // sources with the typed text instead of letting its router decide.
-  const parsed = parseExploreBody(raw);
-  if (!parsed.ok) {
-    return NextResponse.json({ sections: [], scope: {}, error: true, message: parsed.message }, { status: 400 });
-  }
-  let input = parsed.input;
-  const { personalize, projectId, sinceYear, statusFilter, onlyKinds } = parsed;
-  // Optional per-source filters; the backend validates them too.
-  const sourceFilters = parsed.sourceFilters ?? {};
-
-  if (projectId) {
-    const result = await getProject(projectId);
-    if (result.status === "ok") {
-      input = buildProjectExploreQuery(result.project);
+  const prepared = await buildExplorePayload(req, limiter);
+  if (!prepared.ok) {
+    if (prepared.status === 429) {
+      return NextResponse.json(
+        { sections: [], scope: {}, error: true, rate_limited: true, message: prepared.message },
+        { status: 429, headers: retryAfterHeaders() }
+      );
     }
-    // not_found / error -> input stays whatever the client sent (the short
-    // displayed topic) rather than failing the search outright.
+    return NextResponse.json({ sections: [], scope: {}, error: true, message: prepared.message }, { status: 400 });
   }
-
-  // Only the blank landing feed is personalized. A real search is the user's
-  // explicit scope and must not be widened by their profile.
-  let scope: string[] = [];
-  if (personalize && !input.trim()) {
-    try {
-      scope = await getCurrentUserInterests();
-    } catch (e) {
-      // A profile read failing is not a reason to lose the feed — fall back to
-      // the generic one rather than erroring the page.
-      console.error("explore: interests lookup failed", e);
-    }
-  }
+  const { payload } = prepared;
 
   try {
-    const payload: Record<string, unknown> = scope.length > 0 ? { input, scope } : { input };
-    if (sinceYear !== undefined) payload.since_year = sinceYear;
-    if (statusFilter !== undefined) payload.status_filter = statusFilter;
-    if (onlyKinds !== undefined && input.trim()) payload.only_kinds = onlyKinds;
-    if (input.trim()) Object.assign(payload, sourceFilters);
     const res = await fetch(`${EXPLORE_API_URL}/api/explore`, {
       method: "POST",
       headers: exploreBackendHeaders({ "Content-Type": "application/json" }),

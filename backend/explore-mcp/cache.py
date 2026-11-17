@@ -244,6 +244,48 @@ class Cache(ABC):
             )
             return value
 
+    async def peek(
+        self,
+        key: str,
+        compute_fn: Callable[[], Awaitable[Any]],
+        ttl_seconds: float,
+        stale_ttl_seconds: float | None = None,
+    ) -> Any | None:
+        """get_or_compute without the inline compute: the cached value (a stale
+        one schedules the usual background refresh with `compute_fn`), or None
+        on a miss. For a caller that computes the value itself and then
+        stores it with put() — the streaming explore route."""
+        stale_ttl = stale_ttl_seconds if stale_ttl_seconds is not None else ttl_seconds
+        now = time.monotonic()
+        entry = await self._load(key)
+        if entry is not None and entry.is_fresh(now):
+            self.stats.hits += 1
+            return entry.value
+        if entry is not None and entry.is_usable(now):
+            self.stats.stale_hits += 1
+            self._schedule_refresh(key, compute_fn, ttl_seconds, stale_ttl)
+            return entry.value
+        self.stats.misses += 1
+        return None
+
+    async def put(
+        self,
+        key: str,
+        value: Any,
+        ttl_seconds: float,
+        stale_ttl_seconds: float | None = None,
+    ) -> None:
+        """Store a value computed outside get_or_compute, with the same
+        empty-result guard."""
+        stale_ttl = stale_ttl_seconds if stale_ttl_seconds is not None else ttl_seconds
+        store_ttl, store_stale_ttl = (
+            (TTL_EMPTY, STALE_EMPTY) if _is_empty(value) else (ttl_seconds, stale_ttl)
+        )
+        await self._store(
+            key, _Entry(value=value, stored_at=time.monotonic(),
+                        ttl=store_ttl, stale_ttl=store_stale_ttl)
+        )
+
     def _schedule_refresh(
         self,
         key: str,
