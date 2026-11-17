@@ -132,3 +132,23 @@ if __name__ == "__main__":
             failures += 1; print(f"FAIL  {fn.__name__}: {exc}")
     print(f"\n{len(fns) - failures}/{len(fns)} passed")
     sys.exit(1 if failures else 0)
+
+
+def _grants(*hits):
+    return asyncio.run(fetch_grants(_FakeClient({"data": {"oppHits": list(hits)}}), "cancer", 10))
+
+
+def test_grant_dates_parse_mm_dd_yyyy_open_then_close_else_null():
+    items = {it.id: it for it in _grants(
+        {"id": 1, "title": "Cancer grant A", "number": "A-1", "openDate": "03/15/2026", "closeDate": "07/01/2026"},
+        {"id": 2, "title": "Cancer grant B", "number": "B-1", "openDate": "", "closeDate": "12/05/2026"},
+        {"id": 3, "title": "Cancer grant C", "number": "C-1"},
+        {"id": 4, "title": "Cancer grant D", "number": "D-1", "openDate": "13/45/2026"},
+    )}
+
+    assert items["grants_gov:1"].date_iso == "2026-03-15T00:00:00.000Z"
+    assert items["grants_gov:2"].date_iso == "2026-12-05T00:00:00.000Z"
+    assert items["grants_gov:3"].date_iso is None
+    assert items["grants_gov:4"].date_iso is None
+    assert all(it.date_iso != "1970-01-01T00:00:00.000Z" for it in items.values())
+    assert items["grants_gov:1"].raw["open_date"] == "03/15/2026"

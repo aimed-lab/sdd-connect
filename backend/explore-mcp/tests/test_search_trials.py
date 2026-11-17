@@ -59,7 +59,7 @@ def test_trials_item_shape_and_no_signal():
             "protocolSection": {
                 "identificationModule": {"nctId": "NCT01234567", "briefTitle": "Study of X in Glioblastoma"},
                 "statusModule": {"startDateStruct": {"date": "2025-03-01"}, "overallStatus": "RECRUITING"},
-                "descriptionModule": {"briefSummary": "A" * 300},   # long -> sliced to 220
+                "descriptionModule": {"briefSummary": "A" * 300},   # long, no spaces -> hard cut + ellipsis
             }
         },
         {   # no nctId -> dropped
@@ -74,7 +74,8 @@ def test_trials_item_shape_and_no_signal():
     assert it.kind == "trial"
     assert it.source == "clinicaltrials"
     assert it.title == "Study of X in Glioblastoma"
-    assert len(it.summary) == 220              # briefSummary sliced to 220
+    assert len(it.summary) <= 220 and it.summary.endswith("…")
+    assert it.raw["brief_summary"] == "A" * 300
     assert it.url == "https://clinicaltrials.gov/study/NCT01234567"
     assert it.date_iso == "2025-03-01T00:00:00.000Z"
     assert it.signal is None
@@ -172,3 +173,46 @@ if __name__ == "__main__":
             failures += 1; print(f"FAIL  {fn.__name__}: {exc}")
     print(f"\n{len(fns) - failures}/{len(fns)} passed")
     sys.exit(1 if failures else 0)
+
+
+def _study(nct, summary="", start=None):
+    status = {"overallStatus": "RECRUITING"}
+    if start is not None:
+        status["startDateStruct"] = {"date": start}
+    return {"protocolSection": {
+        "identificationModule": {"nctId": nct, "briefTitle": f"Trial {nct} in ALS patients"},
+        "statusModule": status,
+        "descriptionModule": {"briefSummary": summary},
+    }}
+
+
+def test_trial_summary_truncates_at_word_boundary():
+    words = ("This study evaluates the safety of an antisense oligonucleotide in adults "
+             "with ALS who carry specific mutations in the SOD1 gene and have symptoms "
+             "for less than two years, with assessments of function, biomarkers and survival "
+             "over the full treatment period.")
+    assert len(words) > 220
+    client = _FakeClient({"studies": [_study("NCT07290062", words), _study("NCT00000001", "Short summary.")]})
+    items = {it.id: it for it in asyncio.run(fetch_trials(client, "als", 10))}
+
+    long_ = items["clinicaltrials:NCT07290062"].summary
+    assert len(long_) <= 220
+    assert long_.endswith("…")
+    body = long_[:-1]
+    assert words.startswith(body)
+    assert words[len(body)] == " "              # cut falls on a word boundary
+    assert items["clinicaltrials:NCT07290062"].raw["brief_summary"] == words
+    assert items["clinicaltrials:NCT00000001"].summary == "Short summary."
+
+
+def test_trial_dates_month_precision_and_missing_is_null():
+    client = _FakeClient({"studies": [
+        _study("NCT02567136", "x", start="2015-09"),
+        _study("NCT07883590", "x"),                 # no start date
+        _study("NCT07929792", "x", start="garbage"),
+    ]})
+    items = {it.id: it for it in asyncio.run(fetch_trials(client, "als", 10))}
+
+    assert items["clinicaltrials:NCT02567136"].date_iso == "2015-09-01T00:00:00.000Z"
+    assert items["clinicaltrials:NCT07883590"].date_iso is None
+    assert items["clinicaltrials:NCT07929792"].date_iso is None

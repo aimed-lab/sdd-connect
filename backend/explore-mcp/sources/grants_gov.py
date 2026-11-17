@@ -15,7 +15,7 @@ import httpx
 from dedupe import dedupe_key
 from models import Item
 
-from .base import filter_quality, post_json, to_iso
+from .base import filter_quality, post_json, to_iso_or_none
 
 _SEARCH2 = "https://api.grants.gov/v1/api/search2"
 
@@ -91,7 +91,11 @@ async def fetch_grants(
                 continue
 
         opp_id = h.get("id") if h.get("id") is not None else number
-        iso_date = to_iso(h.get("openDate") or h.get("postedDate") or "")
+        iso_date = (
+            to_iso_or_none(h.get("openDate"))
+            or to_iso_or_none(h.get("postedDate"))
+            or to_iso_or_none(h.get("closeDate"))
+        )
         summary = f"{h.get('agencyCode') or '?'} — {h.get('agency') or ''}".strip()
         url = (
             f"https://www.grants.gov/search-results-detail/{h['id']}"

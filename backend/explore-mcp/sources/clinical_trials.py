@@ -32,7 +32,22 @@ import httpx
 from dedupe import dedupe_key
 from models import Item
 
-from .base import filter_quality, get_json, to_iso
+from .base import filter_quality, get_json, to_iso_or_none
+
+_SUMMARY_LIMIT = 220
+
+
+def _clip_words(text: str, limit: int = _SUMMARY_LIMIT) -> str:
+    """Shorten to at most `limit` characters, ending on a word boundary with an
+    ellipsis, so a summary never ends mid-word."""
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    cut = text[: limit - 1]
+    space = cut.rfind(" ")
+    if space > limit // 2:
+        cut = cut[:space]
+    return cut.rstrip(" ,;:-") + "…"
 
 
 def _interventions(arms_module: dict) -> list[dict]:
@@ -78,8 +93,9 @@ async def fetch_trials(
         if not nct_id:   # drop studies with no NCT id
             continue
 
-        iso_date = to_iso((status.get("startDateStruct") or {}).get("date") or "")
-        brief = (desc.get("briefSummary") or "")[:220]
+        iso_date = to_iso_or_none((status.get("startDateStruct") or {}).get("date"))
+        full_summary = desc.get("briefSummary") or ""
+        brief = _clip_words(full_summary)
         overall_status = status.get("overallStatus") or None
         summary = brief or f"{overall_status or 'Active'} clinical trial."
 
@@ -107,6 +123,7 @@ async def fetch_trials(
                     "enrollment": (design.get("enrollmentInfo") or {}).get("count"),
                     "results_posted": bool(status.get("resultsFirstPostDateStruct")),
                     "conditions": proto.get("conditionsModule", {}).get("conditions"),
+                    "brief_summary": full_summary or None,
                 },
             )
         )
