@@ -56,6 +56,7 @@ import {
 } from "@/lib/communityTypes";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "./exploreBackend";
 import { MATCH_LIMIT, MATCH_MIN_COVERAGE, rankCommunities, type RankedCommunity } from "./assistant/communityMatch";
+import { visibleCommunities } from "./communityVisibility";
 import type { ExploreItem } from "@/types/explore";
 import { canAddResource, type CommunityKind } from "./teams/teamRules";
 
@@ -180,10 +181,10 @@ export async function listCommunities(
  *  IMPLEMENTATION: filters the full list listCommunities() already returns, in
  *  memory (a small, fully public table, fetched whole by every other read in
  *  this file), so a result carries the same member_count every card grid does. */
-export async function searchCommunities(query: string): Promise<Community[]> {
+export async function searchCommunities(query: string, opts: { signedIn: boolean }): Promise<Community[]> {
   // Ranking lives in assistant/communityMatch.ts (name > topics > purpose,
   // phrase matches above scattered single words), shared with the assistant.
-  const all = await listCommunities();
+  const all = visibleCommunities(await listCommunities(), opts.signedIn);
   return rankCommunities(query, all).map((r) => r.community);
 }
 
@@ -194,9 +195,11 @@ export async function searchCommunities(query: string): Promise<Community[]> {
  *  creating" step. */
 export async function searchCommunityMatches(
   query: string,
-  limit: number = MATCH_LIMIT
+  opts: { signedIn: boolean; limit?: number }
 ): Promise<RankedCommunity<Community>[]> {
-  const all = await listCommunities();
+  const limit = opts.limit ?? MATCH_LIMIT;
+  // Filtered before ranking, so a signed-out viewer still gets up to `limit` listed communities.
+  const all = visibleCommunities(await listCommunities(), opts.signedIn);
   return rankCommunities(query, all, { minCoverage: MATCH_MIN_COVERAGE, limit });
 }
 

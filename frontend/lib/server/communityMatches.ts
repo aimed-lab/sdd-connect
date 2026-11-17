@@ -9,9 +9,9 @@ import { viewerAccess } from "@/lib/server/communityHome/communityHome";
 import type { CommunityMatch } from "@/lib/server/assistant/communityMatch";
 
 export async function matchCommunitiesForViewer(query: string): Promise<{ signedIn: boolean; matches: CommunityMatch[] }> {
-  const [user, ranked, memberships] = await Promise.all([
-    getCurrentUser(),
-    searchCommunityMatches(query),
+  const user = await getCurrentUser();
+  const [ranked, memberships] = await Promise.all([
+    searchCommunityMatches(query, { signedIn: !!user }),
     listMyMemberships(),
   ]);
 

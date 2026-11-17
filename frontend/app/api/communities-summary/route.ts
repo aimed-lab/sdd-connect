@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { listCommunities, listMyMemberships, searchCommunities } from "@/lib/server/communities";
 import type { CommunitySummaryItem } from "@/lib/server/communities";
+import { visibleCommunities } from "@/lib/server/communityVisibility";
 
 // GET /api/communities-summary[?q=<text>] -> { signedIn, communities }
 //
@@ -33,9 +34,11 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const q = searchParams.get("q")?.trim() ?? "";
 
-    const [user, matched, memberships] = await Promise.all([
-      getCurrentUser(),
-      q ? searchCommunities(q) : listCommunities(),
+    // Signed out, the same communities /communities lists (lib/server/communityVisibility.ts).
+    const user = await getCurrentUser();
+    const signedIn = !!user;
+    const [matched, memberships] = await Promise.all([
+      q ? searchCommunities(q, { signedIn }) : listCommunities().then((all) => visibleCommunities(all, signedIn)),
       listMyMemberships(),
     ]);
 
@@ -51,7 +54,7 @@ export async function GET(req: Request) {
     });
 
     return NextResponse.json(
-      { signedIn: !!user, communities },
+      { signedIn, communities },
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (e) {

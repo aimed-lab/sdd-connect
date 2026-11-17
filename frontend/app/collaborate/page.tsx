@@ -39,6 +39,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { listCollabPosts, type BoardFilter, type CollabPost } from "@/lib/server/collab";
 import { listResources } from "@/lib/server/collaborate";
 import { listCommunities } from "@/lib/server/communities";
+import { visibleCommunities } from "@/lib/server/communityVisibility";
 import { listMyTeamsNewest } from "@/lib/server/teams/teams";
 
 export const dynamic = "force-dynamic"; // board content changes per request
@@ -107,9 +108,9 @@ export default async function CollaboratePage({
   const sp = await searchParams;
   // Your teams card: the signed-in person's own teams (session client, RLS), newest first.
   // Communities card: the public list; listCommunities() returns communities only, never teams.
-  const [myTeams, communities] = await Promise.all([
+  const [myTeams, allCommunities] = await Promise.all([
     listMyTeamsNewest(4).catch(() => []),
-    listCommunities().then((l) => l.slice(0, 5)).catch(() => []),
+    listCommunities().catch(() => []),
   ]);
   const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
@@ -126,6 +127,8 @@ export default async function CollaboratePage({
     getCurrentUser(),
   ]);
   const signedIn = user !== null;
+  // Signed out, the same communities /communities lists.
+  const communities = visibleCommunities(allCommunities, signedIn).slice(0, 5);
 
   // Area chips are derived from the posts actually on the board, so they can
   // never offer a filter that returns nothing.

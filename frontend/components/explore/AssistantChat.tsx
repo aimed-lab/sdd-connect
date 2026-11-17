@@ -891,6 +891,7 @@ export default function AssistantChat() {
           type="button"
           onClick={() => setOpen(true)}
           aria-label="Ask AI assistant"
+          title={signedOut ? "Sign in to use the assistant" : undefined}
           className="fixed right-6 bottom-24 max-sm:right-4 max-sm:bottom-[calc(68px+var(--fb-clear,0px))] z-[56] h-12 px-5 max-sm:w-12 max-sm:px-0 max-sm:justify-center rounded-full btn-primary shadow-lg flex items-center gap-2 font-label-md text-label-md"
         >
           <span className="material-symbols-outlined text-[20px] max-sm:text-[24px]">auto_awesome</span>
@@ -978,6 +979,13 @@ export default function AssistantChat() {
               >
                 Sign in
               </a>
+              <p className="font-body-md text-body-md text-secondary">
+                No account? You can still{" "}
+                <a href="/explore" className="text-primary hover:underline underline-offset-4">
+                  search papers, trials and approvals in Explore
+                </a>
+                .
+              </p>
             </div>
           ) : (
             <>

@@ -10,6 +10,7 @@
 import { getCurrentUser } from "@/lib/auth";
 import { listCommunities, listMyMemberships } from "@/lib/server/communities";
 import { isSiteAdmin } from "@/lib/server/showcase";
+import { listedForSignedOut } from "@/lib/server/communityVisibility";
 import PageHeader, { PageShell } from "@/components/PageHeader";
 import SectionHeading from "@/components/explore/SectionHeading";
 import CommunityCard from "@/components/communities/CommunityCard";
@@ -36,9 +37,9 @@ export default async function CommunitiesPage({
 
   const yours = communities.filter((c) => memberships[c.id]?.status === "active");
   // Signed-out visitors only see communities with at least 3 members (the count the
-  // cards show); signed-in users see all of them.
+  // cards show); signed-in users see all of them. Same rule as the community APIs.
   const others = communities.filter(
-    (c) => memberships[c.id]?.status !== "active" && (user || (c.member_count ?? 0) >= 3)
+    (c) => memberships[c.id]?.status !== "active" && (user || listedForSignedOut(c))
   );
 
   return (
