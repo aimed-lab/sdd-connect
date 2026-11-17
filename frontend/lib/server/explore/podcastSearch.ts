@@ -8,7 +8,10 @@
 // but "ai" does not match inside "available"). A short word term (three letters
 // or fewer, like "ALS" or "AI") must be the whole word, so "ALS" does not find
 // "also"; every term must match somewhere
-// in the episode (AND), and the terms may be in different fields.
+// in the episode (AND), and the terms may be in different fields. Filler words
+// ("in", "the", "of") are dropped from the query unless that leaves nothing.
+// Within a score, episodes whose transcript mentions the terms more often for
+// its length come first.
 
 export type SearchableEpisode = {
   id: string;
@@ -48,8 +51,19 @@ export function episodeNumberQuery(query: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
+const STOPWORDS = new Set([
+  "a", "an", "and", "are", "as", "at", "be", "by", "can", "do", "does", "for", "from", "how", "i", "if",
+  "in", "into", "is", "it", "its", "me", "my", "of", "on", "or", "our", "so", "than", "that", "the",
+  "their", "them", "then", "there", "these", "they", "this", "to", "us", "vs", "was", "we", "were",
+  "what", "when", "where", "which", "who", "why", "will", "with", "you", "your",
+]);
+
+/** The words to search for: lowercase, deduped, filler words dropped (unless
+ *  the query is nothing but filler words), at most eight. */
 export function queryTerms(query: string): string[] {
-  return Array.from(new Set(query.toLowerCase().match(/[a-z0-9]+/g) ?? [])).slice(0, 8);
+  const all = Array.from(new Set(query.toLowerCase().match(/[a-z0-9]+/g) ?? []));
+  const kept = all.filter((t) => !STOPWORDS.has(t));
+  return (kept.length > 0 ? kept : all).slice(0, 8);
 }
 
 type Word = { word: string; start: number; end: number };
@@ -115,8 +129,18 @@ export function highlightParts(text: string, terms: string[]): { text: string; h
   return parts.length > 0 ? parts : [{ text, hit: false }];
 }
 
+/** How often the terms occur in the transcript, per transcript word (0 when
+ *  there is no transcript), so a long transcript does not win by length alone. */
+function termDensity(ws: Word[], terms: string[]): number {
+  if (ws.length === 0) return 0;
+  let n = 0;
+  for (const w of ws) if (terms.some((t) => wordMatches(w.word, t))) n++;
+  return n / ws.length;
+}
+
 /** Episodes matching the query, best first: title matches, then description /
- *  topics, then transcript-only matches; newer episodes first within a tier. */
+ *  topics, then transcript-only matches; within a score, the denser transcript
+ *  match first, then newer episodes. */
 export function searchEpisodes(episodes: SearchableEpisode[], query: string): PodcastHit[] {
   const terms = queryTerms(query);
   if (terms.length === 0) return [];
@@ -126,6 +150,7 @@ export function searchEpisodes(episodes: SearchableEpisode[], query: string): Po
   const wanted = episodeNumberQuery(query);
 
   const hits: PodcastHit[] = [];
+  const density = new Map<string, number>();
   for (const e of episodes) {
     const isWanted = wanted !== null && e.episode_number === wanted;
     // "ep"/"episode" are not words to find in the text; only the number is.
@@ -170,6 +195,7 @@ export function searchEpisodes(episodes: SearchableEpisode[], query: string): Po
       if (fromTranscript) snippet = { text: fromTranscript, field: "transcript" };
     }
 
+    density.set(e.id, termDensity(transcript, textTerms));
     hits.push({
       id: e.id,
       slug: e.slug,
@@ -184,5 +210,10 @@ export function searchEpisodes(episodes: SearchableEpisode[], query: string): Po
     });
   }
 
-  return hits.sort((a, b) => b.score - a.score || (b.episode_number ?? 0) - (a.episode_number ?? 0));
+  return hits.sort(
+    (a, b) =>
+      b.score - a.score ||
+      (density.get(b.id) ?? 0) - (density.get(a.id) ?? 0) ||
+      (b.episode_number ?? 0) - (a.episode_number ?? 0)
+  );
 }

@@ -33,6 +33,10 @@ export type ExploreSection = {
    *  or tab). Absent for every other section kind. */
   items_key?: ExploreItem[];
   error?: string;
+  /** Optional search notes, shown when present: how the query was read for
+   *  this source, and why it came back empty. */
+  interpreted?: unknown;
+  empty_reason?: string | null;
 };
 
 /** The structured scope the backend either extracted from a search or used for
@@ -54,6 +58,11 @@ export type TrialRaw = {
   overall_status?: string | null;
   why_stopped?: string | null;
   phase?: string | null;
+  interventions?: { type?: string | null; name?: string | null }[] | null;
+  lead_sponsor?: string | null;
+  conditions?: string[] | null;
+  /** Not sent yet; shown when present (strings or {facility, city, state, country}). */
+  locations?: unknown[] | null;
 };
 
 /** backend/explore-mcp/sources/openfda.py's `raw` shape (kind "approval").
@@ -147,4 +156,5 @@ export type ExploreResponse = {
   reasoning?: string | null;
   sections: ExploreSection[];
   error?: boolean;
+  interpreted?: unknown;
 };

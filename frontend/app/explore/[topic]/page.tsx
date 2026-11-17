@@ -34,6 +34,8 @@ import QuestionBox from "@/components/explore/QuestionBox";
 import ResourceBento, { liveTile } from "@/components/explore/ResourceBento";
 import ResultsSidebar from "@/components/explore/ResultsSidebar";
 import { ApprovalTile, TILE_GRID, TrialTile } from "@/components/explore/ResultTiles";
+import TrialCompare from "@/components/explore/TrialCompare";
+import { MAX_COMPARE, noteText, toggleCompare } from "@/lib/server/explore/trialGlossary";
 import SectionHeading from "@/components/explore/SectionHeading";
 import { BlockSkeleton, PageSkeleton } from "@/components/explore/Skeletons";
 import {
@@ -152,6 +154,7 @@ function SearchResults() {
   const scope = scopeFromParam(categoryParam);
   const scoped = scope !== "all";
   const [selected, setSelected] = useState<string | null>(null);
+  const [compareIds, setCompareIds] = useState<string[]>([]);
 
   // FIRST LOAD ONLY: when arriving with a projectId (from "Explore for this
   // project" — see lib/projectTypes.ts:buildProjectExploreHref), `topic` is
@@ -171,6 +174,7 @@ function SearchResults() {
     const useProjectContext = isFirstLoadRef.current && !!projectId;
     isFirstLoadRef.current = false;
     setSelected(null);
+    setCompareIds([]);
     (async () => {
       setLoading(true);
       setFailed(false);
@@ -301,15 +305,40 @@ function SearchResults() {
     );
   };
 
+  const trialNote = () => noteText(sectionOf("trial")?.interpreted ?? data?.interpreted);
+
   const trialSection = () => {
     const items = sortTrialsRecruitingFirst(itemsOf("trial"));
     if (items.length === 0) return null;
+    const note = trialNote();
+    const picked = compareIds.map((id) => items.find((i) => i.id === id)).filter((i): i is ExploreItem => !!i);
     return (
       <section key="trial">
         <SectionHeading title="Clinical trials" />
+        {note && <p className="mb-3 font-body-sm text-body-sm text-secondary">Searched for {note}</p>}
+        {items.length > 1 && (
+          <TrialCompare
+            items={picked}
+            onRemove={(id) => setCompareIds((ids) => ids.filter((x) => x !== id))}
+            onClear={() => setCompareIds([])}
+          />
+        )}
         <div className={TILE_GRID}>
           {items.map((item) => (
-            <TrialTile key={item.id} item={item} projectId={projectId} />
+            <TrialTile
+              key={item.id}
+              item={item}
+              projectId={projectId}
+              compare={
+                items.length > 1
+                  ? {
+                      selected: compareIds.includes(item.id),
+                      full: !compareIds.includes(item.id) && picked.length >= MAX_COMPARE,
+                      onToggle: () => setCompareIds((ids) => toggleCompare(ids, item.id)),
+                    }
+                  : undefined
+              }
+            />
           ))}
         </div>
       </section>
@@ -419,7 +448,20 @@ function SearchResults() {
 
   const selectedView = (kind: string) => {
     const section = sectionOf(kind);
-    if (!section || section.items.length === 0) return emptyCategory(kind);
+    if (!section || section.items.length === 0) {
+      const reason = kind === "trial" ? noteText(section?.empty_reason) : null;
+      const note = kind === "trial" ? trialNote() : null;
+      if (!reason && !note) return emptyCategory(kind);
+      return (
+        <div className="space-y-4">
+          <div className="max-w-xl mx-auto font-body-sm text-body-sm text-secondary text-center" role="note">
+            {note && <p>Searched for {note}</p>}
+            {reason && <p className={note ? "mt-1" : undefined}>{reason}</p>}
+          </div>
+          {emptyCategory(kind)}
+        </div>
+      );
+    }
 
     if (kind === "paper") {
       const key = section.items_key ?? [];
