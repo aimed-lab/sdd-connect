@@ -380,6 +380,7 @@ project's credentials, never invent or reuse a value from another project.
 | `LLM_PROVIDER` | Optional | Which LLM provider to use. Defaults to `groq`. |
 | `LLM_MODEL` | Optional | Which model to use for the chosen provider. Has a built-in default. |
 | `LLM_API_KEY` | Optional | Overrides `GROQ_API_KEY` if you want a separate key just for LLM calls. Falls back to `GROQ_API_KEY` if unset. |
+| `EXPLORE_ONLY_SCOPE_LLM` | Optional | Whether a scoped search (the user picked e.g. "Trials") also asks the LLM to read the question, capped at 3 s and shared with the normal search's cache. Defaults on; set `0` to use only the built-in word rules. |
 | `NCBI_API_KEY` | Optional | Raises the PubMed/GEO rate limit. Works fine without it, just slower under load. |
 | `OPENALEX_API_KEY` | Strongly recommended | OpenAlex retired its unauthenticated "polite pool" on 2026-02-13; unset means the throttled common pool, and 429s under fan-out load are swallowed silently per-source. |
 | `GITHUB_TOKEN` | Optional | Raises the GitHub search rate limit. A read-only, no-scopes token is enough. |
