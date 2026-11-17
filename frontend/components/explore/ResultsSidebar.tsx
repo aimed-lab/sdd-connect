@@ -13,6 +13,7 @@ import { useAuth } from "@/context/AuthContext";
 import { followUpsFor } from "@/lib/server/assistant/assistantAnswer";
 import { openAssistant, saveAsLivingPageMessage } from "@/lib/server/assistant/assistantBridge";
 import { matchAction, pickPeopleMatch, type CommunityMatch } from "@/lib/server/assistant/communityMatch";
+import { nextStepsFor } from "@/lib/server/explore/nextSteps";
 import type { ExploreSection } from "@/types/explore";
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
@@ -145,8 +146,47 @@ const FOLLOW_POINTS = [
   "You can add your own notes",
 ];
 
+const loginHref = (topic: string) => `/login?callbackUrl=${encodeURIComponent(`/explore/${encodeURIComponent(topic)}`)}`;
+
+// Signed out: following and follow-up questions need the assistant, which needs
+// an account, so say so before anyone clicks, and offer next steps built only
+// from the results already on the page.
+function SignedOutSidebar({ topic, sections }: { topic: string; sections: ExploreSection[] }) {
+  const steps = nextStepsFor(sections, topic);
+  return (
+    <aside className="flex flex-col gap-4 min-w-0" aria-label="Next steps">
+      <Card title="Next steps">
+        <ul className="flex flex-col gap-2">
+          {steps.map((step) => (
+            <li key={step.key}>
+              <Link href={step.href} className="font-body-sm text-body-sm text-primary hover:underline underline-offset-4 break-words">
+                {step.label} →
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </Card>
+
+      <Card title="Follow or ask a follow-up">
+        <p className="font-body-sm text-body-sm text-secondary break-words">
+          Following {topic} and asking the research assistant need an account. Everything else on this page works
+          without one.
+        </p>
+        <Link href={loginHref(topic)} className="btn-primary self-start px-4 py-2 rounded-lg font-label-md text-label-md">
+          Sign in to use the assistant
+        </Link>
+      </Card>
+
+      <PeopleOnThis topic={topic} />
+    </aside>
+  );
+}
+
 export default function ResultsSidebar({ topic, sections }: { topic: string; sections: ExploreSection[] }) {
+  const { user, loading } = useAuth();
   const questions = followUpsFor(sections, topic).slice(0, 2);
+
+  if (!loading && !user) return <SignedOutSidebar topic={topic} sections={sections} />;
 
   return (
     <aside className="flex flex-col gap-4 min-w-0" aria-label="Next steps">

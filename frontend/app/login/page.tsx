@@ -15,6 +15,7 @@
 // ssoLoginAction returns the Keycloak authorization URL; this page does the
 // actual cross-origin navigation, since only the browser can do that.
 
+import Link from "next/link";
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ssoLoginAction } from "@/app/auth/actions";
@@ -98,6 +99,23 @@ function LoginForm() {
           )}
         </button>
       </div>
+
+      <section aria-labelledby="no-account-heading" className="mt-8 text-center font-body-md text-body-md text-secondary">
+        <h2 id="no-account-heading" className="font-label-lg text-label-lg text-on-background">
+          No account needed to browse
+        </h2>
+        <p className="mt-2">
+          <Link href="/explore" className="text-primary hover:underline underline-offset-4">Explore</Link>,{" "}
+          <Link href="/communities" className="text-primary hover:underline underline-offset-4">Communities</Link>,{" "}
+          <Link href="/explore/podcast" className="text-primary hover:underline underline-offset-4">Podcast</Link>,{" "}
+          <Link href="/events" className="text-primary hover:underline underline-offset-4">Events</Link> and{" "}
+          <Link href="/sparc" className="text-primary hover:underline underline-offset-4">SPARC</Link> are open to
+          everyone.
+        </p>
+        <p className="mt-2">
+          Sign in to comment, join communities, collaborate, submit your work and use the research assistant.
+        </p>
+      </section>
     </div>
   );
 }

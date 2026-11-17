@@ -239,6 +239,14 @@ export default function PhgdhCollectionPage() {
             <p className="mt-3 font-body-lg text-body-lg text-secondary">
               Papers, data, tools and trials on PHGDH, gathered in one place.
             </p>
+            <p className="mt-2 font-body-md text-body-md text-secondary">
+              This page covers the lab&apos;s PHGDH work in Alzheimer&apos;s disease. For PHGDH in cancer and other
+              diseases,{" "}
+              <Link href="/explore/PHGDH" className="text-primary hover:underline underline-offset-4">
+                search PHGDH in Explore
+              </Link>
+              .
+            </p>
           </div>
           <Link
             href="/invite"
