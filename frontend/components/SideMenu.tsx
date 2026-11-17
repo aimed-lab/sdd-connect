@@ -53,6 +53,7 @@ export default function SideMenu({
   open,
   pathname,
   signedIn,
+  programAccess,
   name,
   onEvent,
   onSignOut,
@@ -61,6 +62,8 @@ export default function SideMenu({
   open: boolean;
   pathname: string;
   signedIn: boolean;
+  /** Lead or manager of a CollaboFest project: show the program dashboard link. */
+  programAccess: boolean;
   name: string | null;
   /** Must keep the same identity between renders (it is an effect dependency). */
   onEvent: (event: MenuEvent) => void;
@@ -157,7 +160,7 @@ export default function SideMenu({
         </div>
 
         <nav aria-label="Menu" className="flex-1 min-h-0 overflow-y-auto px-3 py-4 flex flex-col gap-5">
-          {menuGroups(signedIn).map((group) => (
+          {menuGroups(signedIn, programAccess).map((group) => (
             <section key={group.title} aria-label={group.title} className="flex flex-col gap-1">
               <h3 className="px-2 font-label-sm text-[11px] leading-4 font-semibold uppercase tracking-wider text-secondary">{group.title}</h3>
               <ul className="flex flex-col gap-0.5">
