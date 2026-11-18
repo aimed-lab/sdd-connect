@@ -4,7 +4,9 @@
 // follow this topic (starts the assistant's usual wiki-page save flow, with its
 // confirm step), ask a follow-up (two suggestions that open the assistant), and
 // people on this (the best matching community, or a short note when none
-// matches; hidden only when the check itself failed).
+// matches; hidden only when the check itself failed), and companies that might
+// help (up to 3 from the provider directory; never hidden, says so when none
+// match; first in the column when the question asks for companies).
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -21,7 +23,8 @@ import {
   type CommunityMatch,
 } from "@/lib/server/assistant/communityMatch";
 import { nextStepsFor } from "@/lib/server/explore/nextSteps";
-import type { ExploreSection } from "@/types/explore";
+import { asksForProviders, providerSearchTerms } from "@/lib/server/providers/questionTerms";
+import type { ExploreScope, ExploreSection } from "@/types/explore";
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -149,6 +152,114 @@ function PeopleOnThis({ topic }: { topic: string }) {
   );
 }
 
+type ProviderHit = { slug: string; name: string; description: string; services: string[]; category_label: string };
+
+/** One line on what the company does: the first sentence of its own
+ *  description, else its first services, else its category. */
+function whatTheyDo(p: ProviderHit): string {
+  const sentence = (p.description || "").split(/(?<=[.!?])\s/)[0]?.trim() ?? "";
+  if (sentence) return sentence.length > 140 ? `${sentence.slice(0, 139).trimEnd()}…` : sentence;
+  if (p.services.length > 0) return p.services.slice(0, 3).join(", ");
+  return p.category_label;
+}
+
+function parseHits(json: unknown): ProviderHit[] {
+  const list = (json as { providers?: unknown })?.providers;
+  return (Array.isArray(list) ? list : [])
+    .filter(
+      (p: unknown): p is ProviderHit =>
+        !!p && typeof p === "object" && typeof (p as ProviderHit).slug === "string" && typeof (p as ProviderHit).name === "string"
+    )
+    .map((p) => ({
+      slug: p.slug,
+      name: p.name,
+      description: typeof p.description === "string" ? p.description : "",
+      services: Array.isArray(p.services) ? p.services.filter((s): s is string => typeof s === "string") : [],
+      category_label: typeof p.category_label === "string" ? p.category_label : "",
+    }));
+}
+
+// Searches each term on its own (never the whole question; see
+// lib/server/providers/questionTerms.ts) and shows up to 3 companies, earlier
+// terms first, each company once.
+function CompaniesThatMightHelp({ terms }: { terms: string[] }) {
+  const [hits, setHits] = useState<ProviderHit[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const key = terms.join("\n");
+
+  useEffect(() => {
+    let cancelled = false;
+    setHits(null);
+    setFailed(false);
+    const list = key ? key.split("\n") : [];
+    if (list.length === 0) {
+      setHits([]);
+      return;
+    }
+    (async () => {
+      try {
+        const results = await Promise.all(
+          list.map(async (term) => {
+            const res = await fetch(`/api/providers?q=${encodeURIComponent(term)}&limit=3`, { cache: "no-store" });
+            if (!res.ok) throw new Error(`providers ${res.status}`);
+            return parseHits(await res.json());
+          })
+        );
+        if (cancelled) return;
+        const merged: ProviderHit[] = [];
+        for (const p of results.flat()) {
+          if (merged.length < 3 && !merged.some((m) => m.slug === p.slug)) merged.push(p);
+        }
+        setHits(merged);
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [key]);
+
+  const browse = (
+    <Link href="/collaborate/providers" className="text-primary hover:underline underline-offset-4">
+      browse the directory
+    </Link>
+  );
+
+  return (
+    <Card title="Companies that might help">
+      <p className="font-body-sm text-body-sm text-secondary -mt-2">
+        Matches come from the companies&apos; own descriptions in our directory.
+      </p>
+      {failed ? (
+        <p className="font-body-sm text-body-sm text-secondary break-words">
+          Couldn&apos;t check the directory just now. You can {browse}.
+        </p>
+      ) : hits === null ? (
+        <p className="font-body-sm text-body-sm text-secondary">Checking the directory…</p>
+      ) : hits.length === 0 ? (
+        <p className="font-body-sm text-body-sm text-secondary break-words">
+          No matching companies in our directory yet. You can {browse}.
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-3">
+          {hits.map((p) => (
+            <li key={p.slug} className="flex flex-col gap-0.5 min-w-0">
+              <Link
+                href={`/collaborate/providers/${encodeURIComponent(p.slug)}`}
+                className="font-label-lg text-label-lg text-on-background hover:text-primary break-words"
+              >
+                {p.name}
+              </Link>
+              <p className="font-body-sm text-body-sm text-secondary break-words">{whatTheyDo(p)}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
 const FOLLOW_POINTS = [
   "Starts with the results on this page",
   "Private to you until you share it",
@@ -160,10 +271,13 @@ const loginHref = (topic: string) => `/login?callbackUrl=${encodeURIComponent(`/
 // Signed out: following and follow-up questions need the assistant, which needs
 // an account, so say so before anyone clicks, and offer next steps built only
 // from the results already on the page.
-function SignedOutSidebar({ topic, sections }: { topic: string; sections: ExploreSection[] }) {
+function SignedOutSidebar({ topic, sections, scope }: { topic: string; sections: ExploreSection[]; scope?: ExploreScope }) {
   const steps = nextStepsFor(sections, topic);
+  const companies = <CompaniesThatMightHelp terms={providerSearchTerms(scope, topic)} />;
+  const companiesFirst = asksForProviders(topic);
   return (
     <aside className="flex flex-col gap-4 min-w-0" aria-label="Next steps">
+      {companiesFirst && companies}
       <Card title="Next steps">
         <ul className="flex flex-col gap-2">
           {steps.map((step) => (
@@ -187,18 +301,32 @@ function SignedOutSidebar({ topic, sections }: { topic: string; sections: Explor
       </Card>
 
       <PeopleOnThis topic={topic} />
+      {!companiesFirst && companies}
     </aside>
   );
 }
 
-export default function ResultsSidebar({ topic, sections }: { topic: string; sections: ExploreSection[] }) {
+export default function ResultsSidebar({
+  topic,
+  sections,
+  scope,
+}: {
+  topic: string;
+  sections: ExploreSection[];
+  scope?: ExploreScope;
+}) {
   const { user, loading } = useAuth();
   const questions = followUpsFor(sections, topic).slice(0, 2);
 
-  if (!loading && !user) return <SignedOutSidebar topic={topic} sections={sections} />;
+  if (!loading && !user) return <SignedOutSidebar topic={topic} sections={sections} scope={scope} />;
+
+  // A question asking for companies gets the companies card first.
+  const companies = <CompaniesThatMightHelp terms={providerSearchTerms(scope, topic)} />;
+  const companiesFirst = asksForProviders(topic);
 
   return (
     <aside className="flex flex-col gap-4 min-w-0" aria-label="Next steps">
+      {companiesFirst && companies}
       <Card title="Follow this topic">
         <p className="font-body-sm text-body-sm text-secondary break-words">
           Get your own page on {topic}. New papers, trials and approvals are added to it every day.
@@ -238,6 +366,7 @@ export default function ResultsSidebar({ topic, sections }: { topic: string; sec
       </Card>
 
       <PeopleOnThis topic={topic} />
+      {!companiesFirst && companies}
     </aside>
   );
 }

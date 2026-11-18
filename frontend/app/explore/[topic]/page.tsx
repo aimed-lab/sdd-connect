@@ -842,7 +842,7 @@ function SearchResults() {
           </div>
         </div>
 
-        {!loading && !showError && !scoped && <ResultsSidebar topic={topic} sections={sections} />}
+        {!loading && !showError && !scoped && <ResultsSidebar topic={topic} sections={sections} scope={data?.scope} />}
       </div>
     </ExploreShell>
   );
