@@ -14,4 +14,5 @@ export const SYNONYM_GROUPS: string[][] = [
   ["synthesis", "medicinal chemistry", "chemistry cro"],
   ["antibodies", "antibody"],
   ["docking", "virtual screening"],
+  ["gpcr", "gpcrs", "g protein-coupled receptor", "membrane protein", "membrane proteins", "transmembrane"],
 ];
