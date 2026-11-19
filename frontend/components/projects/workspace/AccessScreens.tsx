@@ -5,6 +5,8 @@
 // anything else.
 //   SignInGate        signed out: sign in, come back to this same link
 //   RestrictedAccess  signed in but not on the project
+//   FileAccessNotice  a shared-file link (/projects/<id>/files/<file id>) opened
+//                     signed out, by a non-member, or for a file that is gone
 
 import { useState } from "react";
 import Link from "next/link";
@@ -110,6 +112,80 @@ export function RestrictedAccess({
           Email {COLABOFEST_CONTACT_EMAIL}
         </a>
       </p>
+    </Shell>
+  );
+}
+
+/** In front of a shared project file. Says plainly why it won't open; signed
+ *  out, offers sign-in and comes back to the same file link. */
+export function FileAccessNotice({
+  reason,
+  returnPath,
+  projectPath,
+  email,
+}: {
+  reason: "signed_out" | "not_member" | "not_found" | "error";
+  returnPath: string;
+  projectPath: string;
+  email: string | null;
+}) {
+  const signIn = useStart(() => ssoLoginAction(returnPath));
+  const switchAccount = useStart(() => switchAccountAction(returnPath));
+  const action = reason === "signed_out" ? signIn : reason === "not_member" ? switchAccount : null;
+
+  const title =
+    reason === "not_found"
+      ? "This file isn't available"
+      : reason === "error"
+        ? "This file can't be opened right now"
+        : "You need to be a member of this project";
+  const body =
+    reason === "signed_out"
+      ? "Files shared in a project are only open to its members. Sign in with the email address the project invited."
+      : reason === "not_member"
+        ? "Files shared in a project are only open to its members. Ask a project lead to add you, or sign in with the email address the project invited."
+        : reason === "not_found"
+          ? "It may have been removed from the project."
+          : "Please try again in a moment.";
+
+  return (
+    <Shell>
+      <h1 className="font-headline-md text-headline-md text-on-background">{title}</h1>
+      <p className="font-body-md text-body-md text-secondary">{body}</p>
+      {reason === "not_member" && (
+        <p className="font-body-sm text-body-sm text-secondary">
+          {email ? (
+            <>
+              You are signed in as <strong className="text-on-background [overflow-wrap:anywhere]">{email}</strong>.
+            </>
+          ) : (
+            "You are signed in."
+          )}
+        </p>
+      )}
+      {action?.error && (
+        <p className="font-body-sm text-body-sm text-error" role="alert">
+          {action.error}
+        </p>
+      )}
+      <div className="flex flex-col sm:flex-row gap-3">
+        {action && (
+          <button
+            type="button"
+            onClick={action.go}
+            disabled={action.busy}
+            className="btn-primary sm:flex-1 px-5 py-3 rounded-xl font-label-md text-label-md whitespace-nowrap disabled:opacity-60"
+          >
+            {action.busy ? "Redirecting…" : reason === "signed_out" ? "Sign in" : "Sign in with a different email"}
+          </button>
+        )}
+        <Link
+          href={reason === "signed_out" || reason === "not_member" ? "/projects" : projectPath}
+          className="btn-outline px-5 py-3 rounded-xl font-label-md text-label-md text-center whitespace-nowrap"
+        >
+          {reason === "signed_out" || reason === "not_member" ? "My projects" : "Back to the project"}
+        </Link>
+      </div>
     </Shell>
   );
 }

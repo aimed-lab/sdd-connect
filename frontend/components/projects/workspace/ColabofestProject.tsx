@@ -85,6 +85,7 @@ export default function ColabofestProject({
   finalistTotal,
   progress,
   sharedFolderUrl,
+  filesNode,
   announcements,
   announcementsNew,
   tasksNode,
@@ -111,6 +112,8 @@ export default function ColabofestProject({
   finalistTotal: number;
   progress: { done: number; total: number; percent: number };
   sharedFolderUrl: string | null;
+  /** Shared files (ProjectFilesSection), shown first in the Files view. */
+  filesNode?: React.ReactNode;
   /** The newest announcements first (pinned first); the home shows three. */
   announcements: { id: string; body: string; created_at: string; author_name: string | null; pinned: boolean }[];
   announcementsNew: number;
@@ -332,6 +335,10 @@ export default function ColabofestProject({
           <h2 className="font-title text-[24px] leading-8 text-on-background">{SECTION_TITLE[view]}</h2>
 
           {view === "tasks" && tasksNode}
+
+          {view === "files" && filesNode && (
+            <div className="rounded-2xl border border-[#e8e4da] bg-white p-5 [&>section]:mb-0">{filesNode}</div>
+          )}
 
           {view === "files" && (
             <div className="rounded-2xl border border-[#e8e4da] bg-white p-5 flex flex-col gap-3">

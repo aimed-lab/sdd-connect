@@ -29,6 +29,7 @@ import { assigneeAllowed, isListKey, parseDueDate, parseGithubUrl, type ListKey 
 import { getCurrentUser, getDb, requireCurrentUser, type Db } from "@/lib/auth";
 import type { CreateProjectInput, MyProjectSummary } from "@/lib/projectTypes";
 import { classifyChecklistItem } from "@/lib/server/checklistClassify";
+import { removeAllProjectFileObjects } from "@/lib/server/projectFiles";
 
 const PROJECT_SELECT =
   "id, name, description, lead_id, deadline, challenge_key, program, finalist, created_at";
@@ -1847,6 +1848,10 @@ export async function deleteProject(projectId: string): Promise<DeleteProjectRes
       console.error("deleteProject: proposal file cleanup failed", storageError, filePath);
     }
   }
+
+  // Shared files (project-files bucket). Must run before the project row goes:
+  // the storage policies check project membership, which ends with the row.
+  await removeAllProjectFileObjects(db, projectId);
 
   const { data: deleted, error } = await db
     .from("projects")
