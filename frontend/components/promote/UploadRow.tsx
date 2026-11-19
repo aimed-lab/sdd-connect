@@ -1,12 +1,13 @@
 "use client";
 
-// One file in an upload list (MediaUploader.tsx, QuickShare.tsx): name, size,
+// One file in an upload list (MediaUploader.tsx, QuickShare.tsx, and project
+// files in ProjectFilesSection.tsx): name, size,
 // a progress bar while it uploads, Remove (or Cancel), Resume / Try again,
 // and the one-line label field. The label can be typed while the file is
-// still uploading; it is saved once the file is in (useFileUploads.ts).
+// still uploading; it is saved once the file is in (useResumableUploads.ts).
 
 import { MAX_MEDIA_LABEL_CHARS, formatFileSize } from "@/lib/server/promote/mediaFiles";
-import type { UploadItem } from "@/components/promote/useFileUploads";
+import type { UploadItem } from "@/components/uploads/useResumableUploads";
 
 const KIND_ICON: Record<string, string> = {
   image: "image",

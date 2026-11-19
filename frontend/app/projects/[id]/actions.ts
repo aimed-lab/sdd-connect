@@ -44,6 +44,7 @@ import { requireCurrentUser } from "@/lib/auth";
 import { setFinalistTask } from "@/lib/server/projectWorkspace/finalistTasksDb";
 import { cfAddItem, cfDeleteItem, cfEditItem, cfSetItemDone } from "@/lib/server/projectWorkspace/cfChecklist";
 import type { ListKey } from "@/lib/server/projectWorkspace/status";
+import { ProjectFileError, recordProjectFile, removeProjectFile } from "@/lib/server/projectFiles";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -580,4 +581,53 @@ export async function cfEditItemAction(projectId: string, itemId: string, input:
 export async function cfDeleteItemAction(projectId: string, itemId: string): Promise<ActionResult> {
   if (!itemId) return { ok: false, error: "Missing task." };
   return run(projectId, "cfDeleteItemAction", () => cfDeleteItem(projectId, itemId));
+}
+
+// ── shared files ─────────────────────────────────────────────────────────────
+// File BYTES never come through here: the browser uploads straight to the
+// private project-files bucket, then calls recordProjectFileAction with the
+// object path, which lib/server/projectFiles.ts checks before writing a row.
+
+/** What the upload list needs about a recorded file (UploadedMedia shape). */
+export type ProjectUploadMedia = { id: string; kind: string; filename: string; sizeBytes: number; label: string | null };
+
+export async function recordProjectFileAction(input: {
+  projectId: string;
+  path: string;
+  filename: string;
+  title: string;
+}): Promise<{ ok: true; media: ProjectUploadMedia } | { ok: false; error: string }> {
+  const projectId = typeof input?.projectId === "string" ? input.projectId : "";
+  const path = typeof input?.path === "string" ? input.path : "";
+  const filename = typeof input?.filename === "string" ? input.filename : "";
+  const title = typeof input?.title === "string" ? input.title : "";
+  if (!projectId || !path) return { ok: false, error: "Missing upload." };
+  try {
+    const f = await recordProjectFile({ projectId, path, filename, title });
+    revalidatePath(`/projects/${projectId}`);
+    return {
+      ok: true,
+      media: { id: f.id, kind: f.kind, filename: f.filename, sizeBytes: f.sizeBytes, label: f.title === f.filename ? null : f.title },
+    };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to share files." };
+    if (e instanceof ProjectFileError) return { ok: false, error: e.message };
+    console.error("recordProjectFileAction failed", e);
+    return { ok: false, error: "Couldn't share that file. Please try again." };
+  }
+}
+
+/** Remove a shared file: the uploader, or a project lead or manager (RLS). */
+export async function removeProjectFileAction(projectId: string, fileId: string): Promise<ActionResult> {
+  if (!projectId || !fileId) return { ok: false, error: "Missing file." };
+  try {
+    await removeProjectFile(projectId, fileId);
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to remove files." };
+    if (e instanceof ProjectFileError) return { ok: false, error: e.message };
+    console.error("removeProjectFileAction failed", e);
+    return { ok: false, error: "Couldn't remove that file. Please try again." };
+  }
 }

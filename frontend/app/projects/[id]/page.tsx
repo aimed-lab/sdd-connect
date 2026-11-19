@@ -9,7 +9,7 @@
 //   Wiki      this project's wiki pages (public.pages), "Earlier notes" (the
 //             August project wiki, read only), the project agent, saved resources
 //   Tasks     ChecklistSection and WhoCanHelpSection
-//   Files     SharedFolderSection
+//   Files     ProjectFilesSection (shared files), SharedFolderSection, GithubLinkSection
 //   Team      TeamSection
 //   Proposal  ProposalSection (challenge projects only)
 //
@@ -71,6 +71,8 @@ import ProposalSection from "@/components/projects/ProposalSection";
 import ChecklistSection from "@/components/projects/ChecklistSection";
 import WhoCanHelpSection from "@/components/projects/WhoCanHelpSection";
 import SharedFolderSection from "@/components/projects/SharedFolderSection";
+import ProjectFilesSection from "@/components/projects/workspace/ProjectFilesSection";
+import { listProjectFiles } from "@/lib/server/projectFiles";
 import ResourcesSection from "@/components/projects/ResourcesSection";
 import AgentSection from "@/components/projects/AgentSection";
 import ProjectChatbot from "@/components/projects/ProjectChatbot";
@@ -192,6 +194,25 @@ export default async function ProjectDetailPage({
   // submission, deadline, the registration checklist note) stay on projects.challenge_key.)
   const needsAdminFlag = isColabofest || tab === "team" || tab === "announcements" || tab === "discussions";
   const isSiteAdmin = needsAdminFlag && db ? await viewerIsSiteAdmin(db) : false;
+
+  // Shared files (members only), on every project's Files tab: the ordinary
+  // project's tab below and a CollaboFest project's Files view. Read only when
+  // that tab / view is open.
+  const renderSharedFiles = async (): Promise<React.ReactNode> => {
+    const names: Record<string, string> = {};
+    for (const m of project.members) {
+      const n = m.name || m.email;
+      if (m.user_id && n) names[m.user_id] = n;
+    }
+    const listed = await listProjectFiles(project.id, names);
+    return (
+      <ProjectFilesSection
+        projectId={project.id}
+        files={listed.status === "ok" ? listed.files : []}
+        loadError={listed.status === "ok" ? null : listed.error}
+      />
+    );
+  };
 
   // The tab-by-tab content of an ordinary project (and, for a CollaboFest project, the cards
   // of its Manage view): the sections this page always had.
@@ -350,8 +371,12 @@ export default async function ProjectDetailPage({
       </div>
     );
   } else if (tab === "files") {
+    // A CollaboFest project shows its shared files in the Files view, not in
+    // Manage's "Box folder and GitHub link" card (which also renders this tab).
+    const sharedFiles = isColabofest ? null : await renderSharedFiles();
     content = (
       <>
+        {sharedFiles}
         <SharedFolderSection projectId={project.id} sharedFolder={project.shared_folder} />
         <GithubLinkSection projectId={project.id} githubUrl={project.github_url} />
       </>
@@ -477,6 +502,7 @@ export default async function ProjectDetailPage({
           finalistTotal={taskRows.length}
           progress={progressTotals(lists)}
           sharedFolderUrl={project.shared_folder?.url ?? null}
+          filesNode={colabView === "files" ? await renderSharedFiles() : null}
           announcements={all.map((a) => ({ id: a.id, body: a.body, created_at: a.created_at, author_name: a.author_name, pinned: a.pinned }))}
           announcementsNew={newCount(all, new Date())}
           tasksNode={
