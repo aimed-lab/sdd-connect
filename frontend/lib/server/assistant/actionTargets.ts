@@ -1,7 +1,10 @@
-// lib/server/assistant/actionTargets.ts — which of the person's OWN teams and projects
-// an add-member request ("add xyz@gmail.com to ABCD") means. Pure, so `npm test`
-// covers it; the rows come from app/explore/assistantActions.ts, read with the
-// person's own session.
+// lib/server/assistant/actionTargets.ts — which of the person's OWN places (communities,
+// teams, projects) a request means: "add xyz@gmail.com to ABCD" (add-member flow) or
+// "add this to the Savannah 2026 community" (file flow). Pure, so `npm test` covers it;
+// the rows come from app/explore/assistantActions.ts, read with the person's own session.
+//
+// Each flow passes its own "allowed" rule: canAddMembersTo (team admin; project lead or
+// manager) or canAddFileTo (community admin; any active team member; any project member).
 //
 // THE RULES:
 //   * Only teams and projects the person is already on are ever considered. The model
@@ -15,41 +18,60 @@
 //   * Exact matches win; only when there are none are partial ones offered. Several
 //     candidates are returned as they are: the card shows a picker, never a guess.
 
-import type { TargetType } from "./actionIntent.ts";
+/** A place something can be added to. The add-member flow uses team and project only. */
+export type PlaceType = "community" | "team" | "project";
 
 export type TargetRow = {
-  type: TargetType;
+  type: PlaceType;
   id: string;
   name: string;
-  /** A team's slug, for its link; null for a project. */
+  /** A community's or team's slug, for its link; null for a project. */
   slug: string | null;
   memberCount: number;
-  /** The person's role: a team's community_members.role, a project's project_members.role. */
+  /** The person's role: community_members.role, or project_members.role. */
   role: string;
   /** "C-103" for a CollaboFest project, else null. */
   code: string | null;
+  /** An invite-only community (CollaboFest): no join link or QR is offered. */
+  inviteOnly?: boolean;
+  /** A community that lets people join straight away (teams always do). False: joining
+   *  is a request an admin approves. */
+  isOpen?: boolean;
 };
 
 export type TargetCandidate = {
-  type: TargetType;
+  type: PlaceType;
   id: string;
   name: string;
   slug: string | null;
   memberCount: number;
   code: string | null;
+  inviteOnly: boolean;
+  isOpen: boolean;
   /** Where the card links to. */
   href: string;
 };
 
 export type TargetMatch = {
   candidates: TargetCandidate[];
-  /** Matches the person is on but can't add members to. */
-  notAllowed: { type: TargetType; name: string }[];
+  /** Matches the person is on but can't do this in. */
+  notAllowed: { type: PlaceType; name: string }[];
 };
 
-/** May this person add members here today? */
+/** May this person add members here today? (Teams and projects only.) */
 export function canAddMembersTo(row: Pick<TargetRow, "type" | "role">): boolean {
-  return row.type === "team" ? row.role === "admin" : row.role === "lead" || row.role === "manager";
+  if (row.type === "team") return row.role === "admin";
+  if (row.type === "project") return row.role === "lead" || row.role === "manager";
+  return false;
+}
+
+/** May this person add a file here today? The same rules as the server:
+ *  addCommunityResourceFile / createCommunityResource (a community: its admin; a team:
+ *  any active member; the rows are active memberships only) and recordProjectFile (a
+ *  project: any member). */
+export function canAddFileTo(row: Pick<TargetRow, "type" | "role">): boolean {
+  if (row.type === "community") return row.role === "admin";
+  return true;
 }
 
 /** The CollaboFest code (C-###) in a project's description, or null. */
@@ -74,7 +96,44 @@ function cleanQuery(q: string): string {
 }
 
 function hrefFor(row: TargetRow): string {
-  return row.type === "team" ? `/teams/${row.slug ?? ""}` : `/projects/${row.id}`;
+  if (row.type === "team") return `/teams/${row.slug ?? ""}`;
+  if (row.type === "community") return `/communities/${row.slug ?? ""}`;
+  return `/projects/${row.id}`;
+}
+
+function toCandidate(r: TargetRow): TargetCandidate {
+  return {
+    type: r.type,
+    id: r.id,
+    name: r.name,
+    slug: r.slug,
+    memberCount: r.memberCount,
+    code: r.code,
+    inviteOnly: !!r.inviteOnly,
+    isOpen: r.isOpen ?? true,
+    href: hrefFor(r),
+  };
+}
+
+const TYPE_ORDER: Record<PlaceType, number> = { community: 0, team: 1, project: 2 };
+
+function byTypeThenName(a: TargetRow, b: TargetRow): number {
+  return TYPE_ORDER[a.type] - TYPE_ORDER[b.type] || a.name.localeCompare(b.name);
+}
+
+/** Every place this person may use, for "add this" with no place named: a picker,
+ *  nothing chosen. */
+export function allowedPlaces(rows: TargetRow[], allowed: (r: TargetRow) => boolean = canAddFileTo): TargetCandidate[] {
+  const seen = new Set<string>();
+  return rows
+    .filter((r) => {
+      const k = `${r.type}:${r.id}`;
+      if (seen.has(k) || !allowed(r)) return false;
+      seen.add(k);
+      return true;
+    })
+    .sort(byTypeThenName)
+    .map(toCandidate);
 }
 
 type Strength = "exact" | "partial" | null;
@@ -92,7 +151,12 @@ function strength(row: TargetRow, q: string): Strength {
 
 /** The person's teams and projects that this name means, split into those they may add
  *  members to (candidates) and those they may not. */
-export function matchTargets(rows: TargetRow[], targetName: string, targetType: TargetType | null): TargetMatch {
+export function matchTargets(
+  rows: TargetRow[],
+  targetName: string,
+  targetType: PlaceType | null,
+  allowed: (r: TargetRow) => boolean = canAddMembersTo
+): TargetMatch {
   const q = cleanQuery(targetName);
   const pool = rows.filter((r) => targetType === null || r.type === targetType);
   const scored = pool.map((r) => ({ r, s: strength(r, q) })).filter((x) => x.s !== null);
@@ -108,11 +172,8 @@ export function matchTargets(rows: TargetRow[], targetName: string, targetType: 
   });
 
   return {
-    candidates: unique
-      .filter(canAddMembersTo)
-      .sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name))
-      .map((r) => ({ type: r.type, id: r.id, name: r.name, slug: r.slug, memberCount: r.memberCount, code: r.code, href: hrefFor(r) })),
-    notAllowed: unique.filter((r) => !canAddMembersTo(r)).map((r) => ({ type: r.type, name: r.name })),
+    candidates: unique.filter(allowed).sort(byTypeThenName).map(toCandidate),
+    notAllowed: unique.filter((r) => !allowed(r)).map((r) => ({ type: r.type, name: r.name })),
   };
 }
 

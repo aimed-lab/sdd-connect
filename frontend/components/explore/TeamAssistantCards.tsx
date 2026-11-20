@@ -21,8 +21,9 @@ export function TeamDraftCard({
   initialName: string | null;
   signedIn: boolean;
   authLoading: boolean;
-  /** Tells the panel a team was made (so the page's team lists can refresh). */
-  onCreated?: () => void;
+  /** Tells the panel a team was made (so the page's team lists can refresh), with its
+   *  slug (the file flow continues to its confirm card with it). */
+  onCreated?: (slug: string) => void;
 }) {
   const [name, setName] = useState(initialName ?? "");
   const [emails, setEmails] = useState("");
@@ -58,7 +59,7 @@ export function TeamDraftCard({
     setBusy(false);
     if (!res.ok) return setError(res.error);
     setDone({ slug: res.slug, problems: res.problems });
-    onCreated?.();
+    onCreated?.(res.slug);
   };
 
   return (

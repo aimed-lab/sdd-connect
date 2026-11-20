@@ -223,7 +223,7 @@ test("matching: the CollaboFest code", () => {
 test("matching: several matches are all returned (the card shows a picker)", () => {
   // No type given: the team ABCD and the project ABCD are both exact.
   const m = matchTargets(ROWS, "ABCD", null);
-  assert.deepEqual(m.candidates.map((c) => `${c.type}:${c.id}`), ["project:p4", "team:t1"]);
+  assert.deepEqual(m.candidates.map((c) => `${c.type}:${c.id}`), ["team:t1", "project:p4"]);
   // Only partial matches: every one is offered.
   const lab = matchTargets([row({ type: "team", id: "x1", name: "Glioma Lab A", role: "admin" }), row({ type: "team", id: "x2", name: "Glioma Lab B", role: "admin" })], "Glioma Lab", "team");
   assert.equal(lab.candidates.length, 2);
@@ -272,7 +272,7 @@ test("AssistantChat: email messages are routed before any backend call; only typ
 
 test("/api/assistant refuses a message with an email address before the backend", () => {
   const src = readFileSync(new URL("../../../app/api/assistant/route.ts", import.meta.url), "utf8");
-  const guard = src.indexOf("hasEmailAddress(all[all.length - 1].content)");
+  const guard = src.indexOf("isLocalOnlyMessage(all[all.length - 1].content)");
   assert.ok(guard > 0);
   assert.ok(guard < src.indexOf("fetch(`${EXPLORE_API_URL}/api/assistant-turn`"));
   assert.ok(guard < src.indexOf("projectStatusQuestion("));
