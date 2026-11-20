@@ -2,8 +2,8 @@
 tools/search_grants.py — search federal funding opportunities on Grants.gov.
 
 Wraps sources.grants_gov.fetch_grants. kind="grant", source="grants_gov",
-signal=None (no ranking metric). The source call is isolated — a failure
-degrades to an empty list rather than raising.
+signal=None (no ranking metric). A failed search RAISES (it is not reported as
+an empty list); the caller isolates it. Synopsis enrichment stays best-effort.
 """
 
 from __future__ import annotations
@@ -103,24 +103,23 @@ async def _fetch(
     must_mention: list[str] | None = None, open_only: bool = False,
     agencies: list[str] | tuple[str, ...] | None = None, sort: str | None = None,
 ) -> list[Item]:
-    try:
-        # Both title filters are post-fetch drops, so fetch a wider pool first.
-        filtered = bool(activity_codes or must_mention)
-        fetch_cap = _ACTIVITY_FILTER_POOL_SIZE if filtered else limit
+    # No catch-all: a failed search raises so explore marks the section
+    # source_error (see search_trials._fetch). Synopsis enrichment stays
+    # best-effort (_synopsis catches its own errors).
+    # Both title filters are post-fetch drops, so fetch a wider pool first.
+    filtered = bool(activity_codes or must_mention)
+    fetch_cap = _ACTIVITY_FILTER_POOL_SIZE if filtered else limit
+    if sort == "deadline":
+        fetch_cap = max(fetch_cap, _DEADLINE_POOL_SIZE)
+    async with httpx.AsyncClient(headers={"User-Agent": _USER_AGENT}) as client:
+        items = await fetch_grants(
+            client, query, fetch_cap, activity_codes=activity_codes, must_mention=must_mention,
+            open_only=open_only, agencies=agencies,
+        )
         if sort == "deadline":
-            fetch_cap = max(fetch_cap, _DEADLINE_POOL_SIZE)
-        async with httpx.AsyncClient(headers={"User-Agent": _USER_AGENT}) as client:
-            items = await fetch_grants(
-                client, query, fetch_cap, activity_codes=activity_codes, must_mention=must_mention,
-                open_only=open_only, agencies=agencies,
-            )
-            if sort == "deadline":
-                items = sort_by_deadline(items)
-            items = items[:limit]
-            return await _enrich(client, items)
-    except Exception:
-        logger.exception("search_grants: grants.gov fetch failed for query=%r", query)
-        return []   # per-source isolation
+            items = sort_by_deadline(items)
+        items = items[:limit]
+        return await _enrich(client, items)
 
 
 def search_grants(

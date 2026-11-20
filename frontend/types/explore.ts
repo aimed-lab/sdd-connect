@@ -33,7 +33,10 @@ export type EmptyReason =
   | "no_query"
   | "source_error"
   | "timed_out"
-  | "tool_query";
+  | "tool_query"
+  /** The source was deliberately not searched (FDA for a pure gene/target
+   *  question); `not_searched` on the section says why. */
+  | "not_searched";
 
 export type ExploreSection = {
   tool: string;
@@ -56,6 +59,13 @@ export type ExploreSection = {
    *  (its fetch keeps running and fills the backend cache). */
   timed_out?: boolean;
   empty_reason?: EmptyReason;
+  /** Why this source was not searched, e.g. "FDA labels list diseases, not
+   *  targets". Shown as "Not searched: <reason>" instead of a 0 count. */
+  not_searched?: string;
+  /** Set when part of this section's search failed (one of two trial calls, or
+   *  the broader retry): the items that came back are shown, with this quiet
+   *  "may be incomplete" note. Not an error. */
+  incomplete?: string;
   /** A short source caveat with a link, e.g. the FDA data-lag note on the
    *  approvals section. */
   note?: { text: string; url?: string };

@@ -6,8 +6,8 @@ Wraps sources.geo.fetch_geo. kind="dataset", source="geo", signal=None (no
 ranking metric — GEO records don't cite each other, so there is no citation
 graph for rank_papers_winner to work with; this tool never calls it. See
 ranking.py / search_papers.py for what WINNER needs and why GEO can't supply
-it). The source call is isolated — a failure degrades to an empty list
-rather than raising, same pattern as search_trials.py.
+it). A failed fetch RAISES (it is not reported as an empty list); the
+caller isolates it, same as search_trials.py.
 
 Ordering: relevance, then recency. NCBI's esearch (no `sort=` param, unlike
 pubmed.py's explicit `sort=date`) returns ids in ITS OWN relevance-ranked
@@ -44,12 +44,10 @@ async def search_datasets_async(query: str, limit: int = 20) -> list[Item]:
 
 
 async def _fetch(query: str, limit: int) -> list[Item]:
-    try:
-        async with httpx.AsyncClient() as client:
-            items = await fetch_geo(client, query, limit)
-    except Exception:
-        logger.exception("search_datasets: GEO fetch failed for query=%r", query)
-        return []   # per-source isolation
+    # No catch-all: a failed fetch (an NCBI 429 included) raises so explore
+    # marks the section source_error (see search_trials._fetch).
+    async with httpx.AsyncClient() as client:
+        items = await fetch_geo(client, query, limit)
 
     # No re-sort here — fetch_geo already returns NCBI's own relevance order
     # verbatim (see module docstring for why a date-based tie-break isn't

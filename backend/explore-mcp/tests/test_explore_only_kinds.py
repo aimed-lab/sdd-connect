@@ -87,7 +87,9 @@ def test_pure_gene_question_runs_no_fda_label_search(stubs):
 
     assert [c[0] for c in stubs] == ["search_preprints"]
     approval = next(s for s in result["sections"] if s["kind"] == "approval")
-    assert approval["items"] == [] and approval["empty_reason"] == "no_query"
+    # Still no label search; the section now says it was not searched and why.
+    assert approval["items"] == [] and approval["empty_reason"] == "not_searched"
+    assert approval["not_searched"] == te.FDA_NOT_SEARCHED_REASON
 
 
 def test_tools_and_datasets_scope_runs_both(stubs):

@@ -2,8 +2,8 @@
 tools/search_fda.py — FDA-approved drugs whose label indication mentions a disease.
 
 Wraps sources.openfda.fetch_fda_approvals. kind="approval", source="openfda",
-signal=None. The source call is isolated — a failure degrades to an empty list
-rather than raising. Approvals change slowly, so results are cached for hours.
+signal=None. A failed fetch RAISES (it is not reported as an empty list); the
+caller isolates it. Approvals change slowly, so results are cached for hours.
 """
 
 from __future__ import annotations
@@ -33,12 +33,10 @@ async def search_fda_async(query: str, limit: int = 20, by: str = "indication") 
 
 
 async def _fetch(query: str, limit: int, by: str = "indication") -> list[Item]:
-    try:
-        async with httpx.AsyncClient() as client:
-            return await fetch_fda_approvals(client, query, limit, by=by)
-    except Exception:
-        logger.exception("search_fda: openfda fetch failed for query=%r", query)
-        return []   # per-source isolation
+    # No catch-all: a failed fetch raises so explore marks the section
+    # source_error (see search_trials._fetch).
+    async with httpx.AsyncClient() as client:
+        return await fetch_fda_approvals(client, query, limit, by=by)
 
 
 def boost_distinctive(items: list[Item], tokens: list[str]) -> list[Item]:

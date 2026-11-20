@@ -23,6 +23,15 @@ ClinicalTrials.gov for all five words and got back unrelated trials.
 `refine_scope()` cleans an LLM scope with the same rules, `entities()` lists the
 entities to show and to fall back on, and `mentions_any()` is the relevance gate:
 a plain token match on fields the source already returned.
+
+TARGET FAMILIES ("GPCR", "ion channel") are a sixth, optional scope key,
+`families`. A family is a class of many targets, not one gene, so it is never
+put in `genes` (ChEMBL and Open Targets would look it up as a single target)
+and the key is present in a scope only when a family was found, so every other
+search's scope is unchanged. `family_terms()` gives a family's spellings for
+the relevance gate and `family_query()` the OR query trials, grants and GEO
+search with. Used by the routed path of tools/explore.py too (see
+_with_families there), not only by `only_kinds`.
 """
 
 from __future__ import annotations
@@ -31,6 +40,8 @@ import re
 from dataclasses import dataclass, field
 
 SCOPE_KEYS = ["topics", "genes", "diseases", "assets", "methods"]
+# Optional sixth scope key, present only when a target family was named.
+FAMILY_KEY = "families"
 
 # Seed abbreviation / synonym table: (abbreviation as written, expansion, scope
 # key, extra aliases). Matched case-SENSITIVELY on whole words, so "AD" expands
@@ -70,6 +81,13 @@ ABBREVIATIONS: list[tuple[str, str, str, tuple[str, ...]]] = [
     ("ADC", "antibody-drug conjugate", "assets", ()),
     ("CAR-T", "CAR T-cell therapy", "assets", ("CAR T", "chimeric antigen receptor")),
     ("scRNA-seq", "single-cell RNA-seq", "methods", ("single-cell",)),
+    # Targets and families. Unlike the rows above these match case-insensitively,
+    # with a hyphen or space read alike and an optional plural "s" ("gpcrs",
+    # "G-protein coupled receptors"); see _family_pattern. "kinase" is left out
+    # on purpose: it is part of many single-target questions ("BTK kinase
+    # inhibitor") and would turn every one of them into a family search.
+    ("GPCR", "G protein-coupled receptor", FAMILY_KEY, ("GPCRs", "G-protein coupled receptor")),
+    ("ion channel", "ion channel", FAMILY_KEY, ("ion channels",)),
 ]
 
 # Upper-case words that look like gene symbols but are not.
@@ -197,11 +215,29 @@ def _abbr_pattern(abbr: str) -> re.Pattern:
     return re.compile(r"(?<![\w-])" + re.escape(abbr) + tail)
 
 
-_ABBR_PATTERNS = [(_abbr_pattern(a), a, exp, key, aliases) for a, exp, key, aliases in ABBREVIATIONS]
+def _family_pattern(terms: tuple[str, ...]) -> re.Pattern:
+    """Any spelling of a family, case-insensitive: hyphens and spaces read
+    alike ("G-protein coupled" = "G protein-coupled") and a plural "s" is
+    allowed ("GPCRs", "ion channels"). Longest spelling first."""
+    alts = []
+    for term in sorted({t for t in terms if t}, key=len, reverse=True):
+        parts = [re.escape(p) for p in re.split(r"[\s-]+", term.strip()) if p]
+        alts.append(r"[\s-]+".join(parts) + "s?")
+    return re.compile(r"(?<![\w-])(?:" + "|".join(alts) + r")(?![\w-])", re.I)
+
+
+# A family row's pattern covers every spelling (abbreviation, expansion and
+# aliases), so family rows are matched once here and never in the
+# expansion pass below.
+_ABBR_PATTERNS = [
+    (_family_pattern((a, exp, *aliases)) if key == FAMILY_KEY else _abbr_pattern(a), a, exp, key, aliases)
+    for a, exp, key, aliases in ABBREVIATIONS
+]
 _EXPANSION_PATTERNS = [
     (re.compile(r"\b" + re.escape(exp) + r"\b", re.I), a, exp, key, aliases)
-    for a, exp, key, aliases in ABBREVIATIONS if exp.lower() != a.lower()
+    for a, exp, key, aliases in ABBREVIATIONS if exp.lower() != a.lower() and key != FAMILY_KEY
 ]
+_FAMILY_ROWS = [(p, a, exp, aliases) for p, a, exp, key, aliases in _ABBR_PATTERNS if key == FAMILY_KEY]
 
 
 def _add(scope: dict, key: str, term: str) -> None:
@@ -220,16 +256,54 @@ def _record_aliases(aliases: dict, abbr: str, exp: str, extra: tuple[str, ...]) 
 
 
 def expand_abbreviation(term: str) -> tuple[str, str] | None:
-    """(expansion, scope key) when `term` is exactly a known abbreviation."""
+    """(expansion, scope key) when `term` is exactly a known abbreviation, or
+    exactly any spelling of a target family ("gpcrs" -> G protein-coupled
+    receptor, families)."""
+    text = (term or "").strip()
     for pattern, abbr, exp, key, _aliases in _ABBR_PATTERNS:
-        if term.strip() == abbr:
+        if key == FAMILY_KEY:
+            if pattern.fullmatch(text):
+                return exp, key
+        elif text == abbr:
             return exp, key
     return None
 
 
+def family_terms(family: str) -> list[str]:
+    """Every spelling of a target family, its name first: "G protein-coupled
+    receptor" -> [that, "GPCR", "GPCRs", "G-protein coupled receptor"]. [] for
+    anything that is not a known family."""
+    text = (family or "").strip()
+    for pattern, abbr, exp, aliases in _FAMILY_ROWS:
+        if pattern.fullmatch(text):
+            out: list[str] = []
+            for t in (exp, abbr, *aliases):
+                if t and t.lower() not in {o.lower() for o in out}:
+                    out.append(t)
+            return out
+    return []
+
+
+def family_query(families: list[str]) -> str:
+    """One OR query over every spelling of every named family, phrases quoted:
+    'G protein-coupled receptor' -> '"G protein-coupled receptor" OR GPCR OR
+    GPCRs OR "G-protein coupled receptor"'. ClinicalTrials.gov, Grants.gov and
+    GEO all read this syntax (checked live 2026-11-18: CT.gov 78 trials, the
+    union of the phrase and the abbreviation; unquoted, the phrase matched 385
+    trials on the loose words "protein" and "receptor"; Grants.gov 1 instead of
+    243 unrelated hits; GEO 536)."""
+    parts: list[str] = []
+    for fam in families or []:
+        for t in family_terms(fam) or [fam.strip()]:
+            q = f'"{t}"' if re.search(r"[\s-]", t) else t
+            if t and q not in parts:
+                parts.append(q)
+    return " OR ".join(parts)
+
+
 def parse(text: str) -> Intent:
     raw = _collapse(text or "")
-    intent = Intent(text=raw, core="", scope={k: [] for k in SCOPE_KEYS})
+    intent = Intent(text=raw, core="", scope={k: [] for k in [*SCOPE_KEYS, FAMILY_KEY]})
 
     for pattern, status, label in _STATUS_PATTERNS:
         if pattern.search(raw):
@@ -305,9 +379,12 @@ def refine_scope(llm_scope: dict, intent: Intent) -> dict:
     parse found that the LLM missed. An LLM scope that found nothing falls back
     to the deterministic one."""
     if not isinstance(llm_scope, dict) or is_raw_echo(llm_scope, intent.text):
-        return {k: list(intent.scope.get(k) or []) for k in SCOPE_KEYS}
+        out = {k: list(intent.scope.get(k) or []) for k in SCOPE_KEYS}
+        if intent.scope.get(FAMILY_KEY):
+            out[FAMILY_KEY] = list(intent.scope[FAMILY_KEY])
+        return out
 
-    out: dict[str, list[str]] = {k: [] for k in SCOPE_KEYS}
+    out: dict[str, list[str]] = {k: [] for k in [*SCOPE_KEYS, FAMILY_KEY]}
     for key in SCOPE_KEYS:
         for term in llm_scope.get(key) or []:
             term = str(term).strip()
@@ -322,15 +399,20 @@ def refine_scope(llm_scope: dict, intent: Intent) -> dict:
                 _add(out, expanded[1], expanded[0])
             elif cleaned:
                 _add(out, key, cleaned)
-    for key in ("genes", "diseases", "assets", "methods"):
+    for key in ("genes", "diseases", "assets", "methods", FAMILY_KEY):
         for term in intent.scope.get(key) or []:
             _add(out, key, term)
 
+    # Families are left out of both sets on purpose: a family named as a topic
+    # ("GPCR") stays a topic, since papers, preprints and news search topics,
+    # and a family is not a gene they would otherwise search on.
     entity_lower = {t.lower() for k in ("genes", "diseases", "assets", "methods") for t in out[k]}
-    abbrs = {a.lower() for a, *_ in ABBREVIATIONS}
+    abbrs = {a.lower() for a, _exp, key, _al in ABBREVIATIONS if key != FAMILY_KEY}
     out["topics"] = [t for t in out["topics"] if t.lower() not in entity_lower and t.lower() not in abbrs]
     if not out["topics"] and intent.core and intent.core.lower() not in entity_lower | abbrs:
         out["topics"] = [intent.core]
+    if not out[FAMILY_KEY]:
+        del out[FAMILY_KEY]   # present only when a family was named
     return out
 
 
@@ -347,7 +429,7 @@ def entities(scope: dict, intent: Intent) -> list[str]:
 
     for gene in scope.get("genes") or []:
         add(intent.variants.get(gene, gene))
-    for key in ("assets", "diseases", "methods"):
+    for key in (FAMILY_KEY, "assets", "diseases", "methods"):
         for term in scope.get(key) or []:
             add(term)
     if not out and intent.core:
@@ -363,13 +445,25 @@ def shortest_entity(scope: dict, intent: Intent) -> str:
 
 
 def gate_terms(scope: dict, intent: Intent) -> list[list[str]]:
-    """Alias groups for the relevance gate: genes, assets and diseases (not
-    methods or free-text topics). [] means no gate."""
+    """Alias groups for the relevance gate: genes, assets, diseases and target
+    families (not methods or free-text topics). A family's group is every
+    spelling from the table (family_terms), so a trial that says "GPCR" or
+    "G protein-coupled receptors" passes whichever one was typed. [] means no
+    gate."""
     groups: list[list[str]] = []
     for key in ("genes", "assets", "diseases"):
         for term in scope.get(key) or []:
             group = [term, *intent.aliases.get(term.lower(), [])]
             groups.append(group)
+    for term in scope.get(FAMILY_KEY) or []:
+        group = family_terms(term) or [term]
+        # Plural spellings too: the gate matches whole tokens, so "GPCRs" and
+        # "receptors" are different words from "GPCR" and "receptor".
+        for t in list(group):
+            plural = t if t.lower().endswith("s") else f"{t}s"
+            if plural.lower() not in {g.lower() for g in group}:
+                group.append(plural)
+        groups.append(group)
     return groups
 
 

@@ -10,6 +10,7 @@ import {
   cleanSectionTitles,
   latestEpisode,
   missingKinds,
+  notSearchedReason,
   mixedAll,
   newestOf,
   pickCommunities,
@@ -219,4 +220,24 @@ test("missingKinds: the always-shown kinds with nothing, failed sources listed a
     failed: ["grants"],
   });
   assert.deepEqual(missingKinds([]).empty.length, 6);
+});
+
+test("notSearchedReason: FDA skipped for a target question is 'not searched', not 'nothing found'", () => {
+  const secs = [
+    section("paper", 3),
+    { kind: "approval", items: [], empty_reason: "not_searched", not_searched: "FDA labels list diseases, not targets" },
+  ] as never;
+  assert.equal(notSearchedReason(secs, "approval"), "FDA labels list diseases, not targets");
+  assert.equal(notSearchedReason(secs, "trial"), null);
+  assert.ok(!missingKinds(secs).empty.includes("FDA approvals"));
+  assert.ok(missingKinds(secs).empty.includes("clinical trials"));
+});
+
+test("missingKinds: an empty section whose search partly failed is listed as failed, not 'nothing found'", () => {
+  const secs = [
+    section("paper", 3),
+    { kind: "grant", items: [], incomplete: "Some results couldn't be loaded, so this list may be incomplete." },
+  ] as never;
+  assert.ok(missingKinds(secs).failed.includes("grants"));
+  assert.ok(!missingKinds(secs).empty.includes("grants"));
 });

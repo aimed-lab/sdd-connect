@@ -59,7 +59,7 @@ from tools.search_papers import search_papers_multi_dual_async
 from tools.search_preprints import search_preprints_async
 from tools.search_people import search_people
 from tools.search_tools import search_tools_async
-from tools.search_trials import search_trials_async, search_trials_with_gene_async
+from tools.search_trials import INCOMPLETE_NOTE, search_trials_async, search_trials_with_gene_async
 from tools.search_wiki import search_wiki
 
 SCOPE_KEYS = ["topics", "genes", "diseases", "assets", "methods"]
@@ -614,6 +614,8 @@ def _chembl_query(scope: dict) -> str:
     genes = scope.get("genes") or []
     if genes:
         return genes[0].strip()
+    if _families(scope):
+        return ""   # a family ("GPCR") is many targets, not one to resolve
     return _join_unique(*[scope[k] for k in SCOPE_KEYS])
 
 
@@ -633,6 +635,8 @@ def _opentargets_query(scope: dict) -> str:
     diseases = scope.get("diseases") or []
     if diseases:
         return diseases[0].strip()
+    if _families(scope):
+        return ""   # a family ("GPCR") is many targets, not one to resolve
     return _join_unique(*[scope[k] for k in SCOPE_KEYS])
 
 
@@ -657,7 +661,30 @@ def _preprints_query(scope: dict) -> str:
     return " AND ".join(parts)
 
 
+def _families(scope: dict) -> list[str]:
+    return [f.strip() for f in (scope.get(query_intent.FAMILY_KEY) or []) if f and f.strip()]
+
+
+def _family_led(scope: dict) -> bool:
+    """A target family is the subject: one is named, and no disease or gene
+    is there to search on instead ("GPCR", not "GPCR in schizophrenia")."""
+    return bool(_families(scope)) and not scope.get("diseases") and not scope.get("genes")
+
+
+def _is_target_query(scope: dict) -> bool:
+    """A gene or a target family is named, and nothing an FDA label indication
+    could match (no disease, no drug)."""
+    return bool(scope.get("genes") or _families(scope)) and not scope.get("diseases") and not scope.get("assets")
+
+
+# Sources that search a target family's spellings as one OR query when the
+# family is the subject (see query_intent.family_query).
+_FAMILY_QUERY_TOOLS = {"search_trials", "search_grants", "search_datasets"}
+
+
 def _query_for(name: str, scope: dict) -> str:
+    if name in _FAMILY_QUERY_TOOLS and _family_led(scope):
+        return query_intent.family_query(_families(scope))
     if name == "search_preprints":
         return _preprints_query(scope)
     if name == "search_fda":
@@ -899,6 +926,14 @@ _SOURCE_TIMEOUTS: dict[str, float] = {
 _DEFAULT_DEADLINE = 25.0
 _MIN_REMAINING = 0.25   # a source whose turn comes after the deadline still gets a cache hit
 _TIMED_OUT = object()
+# A chosen source that deliberately did not search (FDA for a pure target
+# query): its section says why instead of reading as "found nothing".
+_NOT_SEARCHED = object()
+FDA_NOT_SEARCHED_REASON = "FDA labels list diseases, not targets"
+
+
+async def _not_searched():
+    return _NOT_SEARCHED
 # A page with a timed-out section is recomputed after this many seconds, so the
 # UI's "retry" gets the source's late answer from the per-tool cache instead
 # of the same cached gap.
@@ -1110,7 +1145,13 @@ def _plan(
         if name == "search_fda":
             plan = ("indication", overrides[name]) if overrides.get(name) else _fda_plan(scope)
             if not plan:
-                continue   # pure gene/target query: no label indication to search
+                # Pure gene/target query: no label indication to search. Say so
+                # (a "not searched" section) instead of showing 0 approvals; a
+                # scope with no target at all keeps the old silent skip.
+                if _is_target_query(scope):
+                    tasks.append(_not_searched())
+                    specs.append((name, _KINDS[name], ""))
+                continue
             mode, query = plan
             tasks.append(_fda_task(query, mode, _distinctive_tokens(scope.get("_raw_input") or "")))
             specs.append((name, _KINDS[name], query))
@@ -1118,6 +1159,8 @@ def _plan(
         query = overrides.get(name) or _query_for(name, scope)
         if name == "search_preprints" and not query:
             continue   # nothing to search on
+        if name in ("search_chembl", "search_opentargets") and not query:
+            continue   # a target family only: no single target to look up
         if name == "search_opentargets":
             # Thread the disease term through as a SEPARATE parameter
             # alongside the gene, not concatenated into `query` — see
@@ -1194,6 +1237,10 @@ def _build_section(tool: str, kind: str, query: str, result, scope: dict) -> dic
             "explore: tool %s failed for query=%r", tool, query, exc_info=result
         )
         section = _error_section(tool, kind, query, result)
+    elif result is _NOT_SEARCHED:
+        section["items"] = []
+        section["not_searched"] = FDA_NOT_SEARCHED_REASON
+        section["empty_reason"] = "not_searched"
     elif result is _TIMED_OUT:
         # Over the per-tool cap: the page still loads, and the section says
         # it ran out of time (not that it found nothing).
@@ -1219,6 +1266,11 @@ def _build_section(tool: str, kind: str, query: str, result, scope: dict) -> dic
             section["items_relevant"] = _relevance_order(latest, key, scope["_raw_input"])
     else:
         section["items"] = [item.model_dump() for item in result]
+        if getattr(result, "partial", False):
+            # Several calls, some failed: show what came back, say it may be
+            # incomplete, and keep the page out of the long cache (_has_failed_section).
+            section["incomplete"] = INCOMPLETE_NOTE
+            logger.warning("explore: tool %s partly failed for query=%r: %s", tool, query, result.failed)
     if kind == "approval":
         section["note"] = dict(_FDA_NOTE)
     return section
@@ -1469,6 +1521,8 @@ def _gate_section(section: dict, groups: list[list[str]]) -> None:
 
 
 def _empty_reason(section: dict) -> str:
+    if section.get("not_searched"):
+        return "not_searched"
     if section.get("error"):
         return "source_error"
     if section.get("timed_out"):
@@ -1533,6 +1587,11 @@ async def _execute_only(
             _gate_section(s, groups)
             first = by_tool[s["tool"]]
             first["fallback_query"] = entity
+            if s.get("error") or s.get("timed_out"):
+                # The first search came back empty and the broader retry failed:
+                # not "nothing found" for certain. Same rule as several calls in
+                # one section: keep what came back, note it, no long cache.
+                first["incomplete"] = INCOMPLETE_NOTE
             if s.get("items"):
                 used_fallback = entity
                 first["items"] = s["items"]
@@ -1649,6 +1708,26 @@ async def _explore_uncached(
     }
 
 
+def _with_families(scope: dict, input_text: str) -> dict:
+    """The LLM scope plus any target family the deterministic parser finds in
+    the text (query_intent), with family spellings the LLM filed as genes
+    moved out of `genes` ("GPCR" is a class of targets, not one gene). The
+    `families` key is added only when a family was found, so every other
+    search's scope is returned unchanged."""
+    families = list(query_intent.parse(input_text or "").scope.get(query_intent.FAMILY_KEY) or [])
+    genes: list[str] = []
+    for gene in scope.get("genes") or []:
+        expanded = query_intent.expand_abbreviation(str(gene))
+        if expanded and expanded[1] == query_intent.FAMILY_KEY:
+            if expanded[0] not in families:
+                families.append(expanded[0])
+        else:
+            genes.append(gene)
+    if not families:
+        return scope
+    return {**scope, "genes": genes, query_intent.FAMILY_KEY: families}
+
+
 async def _prepare(
     input_text: str, scope_terms: list[str] | None, source_filters: dict | None,
 ) -> dict:
@@ -1674,7 +1753,7 @@ async def _prepare(
             lambda: asyncio.to_thread(_extract_scope, input_text),
             TTL_LLM, STALE_LLM,
         )
-        scope = {**scope, "is_default": False, "is_personalized": False}
+        scope = {**_with_families(scope, input_text), "is_default": False, "is_personalized": False}
         chosen, reasoning = await cache.get_or_compute(
             normalize_key("route", input_text),
             lambda: asyncio.to_thread(_choose_tools, input_text, scope),
@@ -1705,6 +1784,31 @@ async def _prepare(
         and _fda_plan(scope)
     ):
         chosen.append("search_fda")
+    # A target family as the subject ("GPCR") names no disease, so the router's
+    # disease rule never picks trials or grants, and no gene, so it skips GEO.
+    # Run all three on the family's OR query (see _query_for); the GEO check
+    # just below can still drop datasets for a software question. A family is
+    # no single target, so ChEMBL / Open Targets are dropped unless a gene (or,
+    # for Open Targets, a disease) is there to look up.
+    if (input_text or "").strip() and _families(scope):
+        if _family_led(scope):
+            for tool in ("search_trials", "search_grants", "search_datasets"):
+                if tool not in chosen:
+                    chosen.append(tool)
+        if not scope.get("genes"):
+            chosen = [t for t in chosen if t != "search_chembl"]
+            if not scope.get("diseases"):
+                chosen = [t for t in chosen if t != "search_opentargets"]
+    # A pure target query (gene or family, no disease or drug) has no label
+    # indication to search: add FDA so its section can say "not searched"
+    # rather than leave the tab at 0 (_plan builds that section).
+    if (
+        (input_text or "").strip()
+        and "search_fda" not in chosen
+        and _is_target_query(scope)
+        and not _fda_plan({**scope, "_raw_input": input_text})
+    ):
+        chosen.append("search_fda")
     # GEO expression series are noise for a question about software, unless it
     # also asks about data.
     if (input_text or "").strip() and "search_datasets" in chosen \
@@ -1728,7 +1832,7 @@ def _has_failed_section(result: dict) -> bool:
     """A section that timed out or whose source raised: don't pin the whole
     response for the full TTL (an empty preprint section stuck for an hour was
     issue #66)."""
-    return any(s.get("timed_out") or s.get("error") for s in result.get("sections", []))
+    return any(s.get("timed_out") or s.get("error") or s.get("incomplete") for s in result.get("sections", []))
 
 
 async def explore_async(

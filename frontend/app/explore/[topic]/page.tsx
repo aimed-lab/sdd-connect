@@ -42,6 +42,7 @@ import { BlockSkeleton, PageSkeleton } from "@/components/explore/Skeletons";
 import {
   categoryToTab,
   missingKinds,
+  notSearchedReason,
   mixedAll,
   resultTabs,
   scopeFromParam,
@@ -415,6 +416,11 @@ function SearchResults() {
       <section key="trial">
         <SectionHeading title="Clinical trials" />
         {note && <p className="mb-3 font-body-sm text-body-sm text-secondary">Searched for {note}</p>}
+        {sectionOf("trial")?.incomplete && (
+          <p className="mb-3 font-body-sm text-body-sm text-secondary" role="note">
+            {sectionOf("trial")?.incomplete}
+          </p>
+        )}
         {items.length > 1 && (
           <TrialCompare
             items={picked}
@@ -513,6 +519,7 @@ function SearchResults() {
   const allView = () => {
     const groups = mixedAll(sections, 10);
     const missing = missingKinds(sections);
+    const fdaNotSearched = notSearchedReason(sections, "approval");
     const q = encodeURIComponent(topic);
     return (
       <div className="space-y-10">
@@ -531,7 +538,7 @@ function SearchResults() {
             )}
           </section>
         ))}
-        {!loading && (missing.empty.length > 0 || missing.failed.length > 0) && (
+        {!loading && (missing.empty.length > 0 || missing.failed.length > 0 || fdaNotSearched) && (
           <div className="rounded-xl bg-surface-container-low px-4 py-3 font-body-sm text-body-sm text-secondary" role="note">
             {missing.empty.length > 0 && (
               <p>
@@ -541,6 +548,11 @@ function SearchResults() {
             {missing.failed.length > 0 && (
               <p className={missing.empty.length > 0 ? "mt-1" : undefined}>
                 Couldn&apos;t search {listJoin(missing.failed)} right now. Try again in a moment.
+              </p>
+            )}
+            {fdaNotSearched && (
+              <p className={missing.empty.length > 0 || missing.failed.length > 0 ? "mt-1" : undefined}>
+                FDA approvals not searched: {fdaNotSearched}.
               </p>
             )}
           </div>
@@ -572,15 +584,26 @@ function SearchResults() {
         </div>
       );
     }
+    const notSearched = notSearchedReason(sections, kind);
+    if (notSearched) {
+      // Deliberately not searched: say why, never "try a broader term".
+      return (
+        <div className="max-w-xl mx-auto text-center space-y-4" role="note">
+          <p className="font-body-md text-body-md text-on-background">Not searched: {notSearched}.</p>
+          {kind === "approval" && fdaNote("approval")}
+        </div>
+      );
+    }
     if (!section || section.items.length === 0) {
       const reason = kind === "trial" ? emptyReasonText(section?.empty_reason) : null;
       const note = kind === "trial" ? trialNote() : null;
       return (
         <div className="space-y-4">
-          {(reason || note) && (
+          {(reason || note || section?.incomplete) && (
             <div className="max-w-xl mx-auto font-body-sm text-body-sm text-secondary text-center" role="note">
               {note && <p>Searched for {note}</p>}
               {reason && <p className={note ? "mt-1" : undefined}>{reason}</p>}
+              {section?.incomplete && <p className={note || reason ? "mt-1" : undefined}>{section.incomplete}</p>}
             </div>
           )}
           {emptyCategory(kind)}
@@ -739,7 +762,14 @@ function SearchResults() {
                     }
                   >
                     {t.label}
-                    <span className={"ml-1.5 " + (on ? "text-primary" : "text-secondary/70")}>{t.count}</span>
+                    {notSearchedReason(sections, t.key) ? (
+                      <span className={"ml-1.5 " + (on ? "text-primary" : "text-secondary/70")}>
+                        <span aria-hidden="true">–</span>
+                        <span className="sr-only">not searched</span>
+                      </span>
+                    ) : (
+                      <span className={"ml-1.5 " + (on ? "text-primary" : "text-secondary/70")}>{t.count}</span>
+                    )}
                   </button>
                 );
               })}

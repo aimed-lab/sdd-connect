@@ -199,9 +199,11 @@ def test_oral_pcsk9_inhibitors_competitive_landscape(env):
     assert trial["fallback_query"] == "PCSK9"
     assert trial["filtered_out"] == 1
     # A pure gene/target question runs no label search (issue #65): label
-    # indications name diseases, not targets.
+    # indications name diseases, not targets. The section says so ("not
+    # searched") instead of reading as zero approvals.
     approval = _section(result, "approval")
-    assert approval["items"] == [] and approval["empty_reason"] == "no_query"
+    assert approval["items"] == [] and approval["empty_reason"] == "not_searched"
+    assert approval["not_searched"] == te.FDA_NOT_SEARCHED_REASON
     assert approval["note"]["url"].startswith("https://www.accessdata.fda.gov/")
     assert _queries(env["calls"], "fda") == []
     news = _section(result, "news")

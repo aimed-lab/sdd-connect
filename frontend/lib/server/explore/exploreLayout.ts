@@ -247,13 +247,24 @@ export function cleanSectionTitles(sections: ExploreSection[]): ExploreSection[]
  *  source failed is listed under `failed`, not `empty`. */
 const MISSING_LABEL: Record<string, string> = { paper: "papers", trial: "clinical trials", approval: "FDA approvals", compound: "compounds", dataset: "datasets", grant: "grants" };
 
+/** Why the backend deliberately did not search this kind (FDA for a pure
+ *  gene/target question: "FDA labels list diseases, not targets"), or null. */
+export function notSearchedReason(sections: ExploreSection[], kind: string): string | null {
+  const s = sections.find((x) => x.kind === kind && typeof x.not_searched === "string" && x.not_searched.trim());
+  return s && countOfKind(sections, kind) === 0 ? (s.not_searched as string).trim() : null;
+}
+
 export function missingKinds(sections: ExploreSection[]): { empty: string[]; failed: string[] } {
   const empty: string[] = [];
   const failed: string[] = [];
   for (const t of FIXED_RESULT_TABS) {
     if (countOfKind(sections, t.key) > 0) continue;
+    // Not searched on purpose (see notSearchedReason): not "nothing found".
+    if (notSearchedReason(sections, t.key)) continue;
     const label = MISSING_LABEL[t.key] ?? t.label.toLowerCase();
-    if (sections.some((s) => s.kind === t.key && !!s.error)) failed.push(label);
+    // An error, or nothing back from a search that partly failed (`incomplete`):
+    // not a sure "nothing found".
+    if (sections.some((s) => s.kind === t.key && (!!s.error || !!s.incomplete))) failed.push(label);
     else empty.push(label);
   }
   return { empty, failed };
