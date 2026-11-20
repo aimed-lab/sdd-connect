@@ -47,6 +47,7 @@ import {
 import { buildCfLists, progressTotals, showTasksTile, visibleCfLists } from "@/lib/server/projectWorkspace/cfTasks";
 import ProjectTasksView from "@/components/projects/workspace/ProjectTasksView";
 import ProjectTeamView from "@/components/projects/workspace/ProjectTeamView";
+import { canManageMembers } from "@/lib/server/projectWorkspace/teamControls";
 import ManageCard from "@/components/projects/workspace/ManageCard";
 import { newCount } from "@/lib/server/communityHome/tiles";
 import ColabofestProject from "@/components/projects/workspace/ColabofestProject";
@@ -72,7 +73,7 @@ import ChecklistSection from "@/components/projects/ChecklistSection";
 import WhoCanHelpSection from "@/components/projects/WhoCanHelpSection";
 import SharedFolderSection from "@/components/projects/SharedFolderSection";
 import ProjectFilesSection from "@/components/projects/workspace/ProjectFilesSection";
-import { listProjectFiles } from "@/lib/server/projectFiles";
+import { countProjectFiles, listProjectFiles } from "@/lib/server/projectFiles";
 import ResourcesSection from "@/components/projects/ResourcesSection";
 import AgentSection from "@/components/projects/AgentSection";
 import ProjectChatbot from "@/components/projects/ProjectChatbot";
@@ -502,6 +503,8 @@ export default async function ProjectDetailPage({
           finalistTotal={taskRows.length}
           progress={progressTotals(lists)}
           sharedFolderUrl={project.shared_folder?.url ?? null}
+          // Only the home shows the tiles; one head-only count query.
+          sharedFileCount={colabView ? null : await countProjectFiles(project.id)}
           filesNode={colabView === "files" ? await renderSharedFiles() : null}
           announcements={all.map((a) => ({ id: a.id, body: a.body, created_at: a.created_at, author_name: a.author_name, pinned: a.pinned }))}
           announcementsNew={newCount(all, new Date())}
@@ -534,7 +537,7 @@ export default async function ProjectDetailPage({
               </p>
             )
           }
-          teamNode={<ProjectTeamView projectId={project.id} members={project.members} isManager={isManager} startAdd={one(sp.add) === "1"} />}
+          teamNode={<ProjectTeamView projectId={project.id} members={project.members} canManageMembers={canManageMembers(role)} startAdd={one(sp.add) === "1"} />}
           manageNode={manageNode}
           nextDate={nextTimelineDate(today)}
         />

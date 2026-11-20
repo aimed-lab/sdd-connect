@@ -1,16 +1,18 @@
 "use client";
 
 // The Team view of a CollaboFest project: a clean list (avatar, name, role: Lead / Member /
-// SPARC team, and the SPARC or Southern Research affiliation when set). Managers (the
-// SPARC team) also get "Add a member by email" and "Remove" for ordinary members, the same
-// flow and rules as the old Team section (lib/server/projects.ts addProjectMember /
-// removeProjectMember). Everyone else only reads.
+// SPARC team, and the SPARC or Southern Research affiliation when set). Leads and managers
+// (the SPARC team) also get "Add a member by email" and "Remove" for ordinary members, the
+// same flow and rules as the old Team section (lib/server/projects.ts addProjectMember /
+// removeProjectMember). There is no control here to add or remove a manager or change a
+// role (lib/server/projectWorkspace/teamControls.ts). Everyone else only reads.
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { addMemberAction, removeMemberAction } from "@/app/projects/[id]/actions";
 import { initials } from "@/lib/server/communityHome/communityHome";
 import { AFFILIATION_LABEL } from "@/lib/server/projectWorkspace/colabofest";
+import { INVITED_LABEL, NO_EMAIL_NOTE, teamControls } from "@/lib/server/projectWorkspace/teamControls";
 import type { ProjectMember } from "@/lib/server/projects";
 
 const ROLE: Record<string, string> = { lead: "Lead", manager: "SPARC team", member: "Member" };
@@ -18,16 +20,18 @@ const ROLE: Record<string, string> = { lead: "Lead", manager: "SPARC team", memb
 export default function ProjectTeamView({
   projectId,
   members,
-  isManager,
+  canManageMembers,
   startAdd,
 }: {
   projectId: string;
   members: ProjectMember[];
-  isManager: boolean;
+  /** A lead or a manager: may add and remove ordinary members (canManageMembers()). */
+  canManageMembers: boolean;
   /** Focus the add box on arrival (the "+" sheet's Add member). */
   startAdd: boolean;
 }) {
   const router = useRouter();
+  const controls = teamControls(canManageMembers);
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -74,10 +78,10 @@ export default function ProjectTeamView({
                 <p className="text-[12px] leading-4 text-secondary">
                   {ROLE[m.role] ?? "Member"}
                   {m.affiliation ? ` · ${AFFILIATION_LABEL[m.affiliation]}` : ""}
-                  {pending ? " · invited" : ""}
+                  {pending ? ` · ${INVITED_LABEL}` : ""}
                 </p>
               </div>
-              {isManager && m.role === "member" && (
+              {controls.canRemove(m.role) && (
                 <button
                   type="button"
                   onClick={() => remove(m)}
@@ -92,7 +96,7 @@ export default function ProjectTeamView({
         })}
       </ul>
 
-      {isManager && (
+      {controls.canAdd && (
         <form onSubmit={add} className="rounded-2xl border border-[#e8e4da] bg-white p-3.5 flex flex-col gap-2.5">
           <label htmlFor="add-member-email" className="font-label-md text-label-md text-on-background">
             Add a member by email
@@ -112,7 +116,7 @@ export default function ProjectTeamView({
               {busy === "add" ? "Adding…" : "Add"}
             </button>
           </div>
-          <p className="font-body-sm text-body-sm text-secondary">They can open the project once they sign in with this email.</p>
+          <p className="font-body-sm text-body-sm text-secondary">{NO_EMAIL_NOTE}</p>
           {note && <p className="font-body-sm text-body-sm text-primary">{note}</p>}
         </form>
       )}
