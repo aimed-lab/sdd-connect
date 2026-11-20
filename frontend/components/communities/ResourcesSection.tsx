@@ -51,7 +51,6 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
-  addCommunityResourceFileAction,
   createCommunityResourceAction,
   deleteCommunityResourceAction,
   pinCommunityResourceAction,
@@ -61,6 +60,10 @@ import {
 import type { CommunityResource, CommunityResourceFile } from "@/lib/server/communities";
 import { COMMUNITY_RESOURCE_TYPES, type CommunityResourceType } from "@/lib/communityTypes";
 import CollapsibleSection from "./CollapsibleSection";
+import UploadRow from "@/components/promote/UploadRow";
+import { useCommunityFileUploads } from "./useCommunityFileUploads";
+import { getResumableUploadTarget } from "@/lib/authClient";
+import { COMMUNITY_FILE_ACCEPT, communityFileProblem, shouldDiscardNewResource } from "@/lib/server/communityFileRules";
 
 // id is optional here specifically so this one type covers both
 // createCommunityResourceAction's result (carries the new row's id, needed
@@ -68,9 +71,6 @@ import CollapsibleSection from "./CollapsibleSection";
 // updateCommunityResourceAction's (no id — the resource already had one).
 type ActionResult = { ok: true; id?: string } | { ok: false; error: string };
 
-const MAX_RESOURCE_FILE_BYTES = 50 * 1024 * 1024;
-const RESOURCE_FILE_ACCEPT =
-  "image/png,image/jpeg,image/webp,image/gif,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
 /** The files field inside ResourceForm — a slim "Add a file" trigger, not
  *  a large dropzone, so the form stays compact for the common title-only
@@ -85,8 +85,9 @@ const RESOURCE_FILE_ACCEPT =
  *   - PENDING files — chosen but not yet uploaded, held as plain File
  *     objects in the parent's state; Remove here is purely local (splice
  *     out of the array), no network call, since nothing has been sent yet.
- *  Validates size/type on pick (the bucket's own limits are the real gate,
- *  same belt-and-suspenders posture as MediaUploader.tsx). */
+ *  Validates size/type on pick (communityFileProblem; the bucket's own limits
+ *  and the server's record check are the real gate). Files go up only after
+ *  the resource is saved (ResourceForm, useCommunityFileUploads). */
 function ResourceFilesField({
   pendingFiles,
   onAddPending,
@@ -94,7 +95,10 @@ function ResourceFilesField({
   existingFiles,
   onRemoveExisting,
   removingExistingId,
+  disabled = false,
 }: {
+  /** While files are uploading: no new picks (they would never be sent). */
+  disabled?: boolean;
   pendingFiles: File[];
   onAddPending: (files: File[]) => void;
   onRemovePending: (index: number) => void;
@@ -108,9 +112,10 @@ function ResourceFilesField({
   const pick = (fileList: FileList | null) => {
     setPickError(null);
     const picked = Array.from(fileList ?? []);
-    const tooBig = picked.find((f) => f.size > MAX_RESOURCE_FILE_BYTES);
-    if (tooBig) {
-      setPickError(`"${tooBig.name}" is over 50 MB.`);
+    const problem = picked.map((f) => communityFileProblem(f.name, f.type, f.size)).find(Boolean);
+    if (problem) {
+      setPickError(problem);
+      if (fileRef.current) fileRef.current.value = "";
       return;
     }
     if (picked.length > 0) onAddPending(picked);
@@ -128,7 +133,8 @@ function ResourceFilesField({
         <button
           type="button"
           onClick={() => fileRef.current?.click()}
-          className="shrink-0 inline-flex items-center gap-1 font-label-sm text-label-sm text-primary hover:underline"
+          disabled={disabled}
+          className="shrink-0 inline-flex items-center gap-1 font-label-sm text-label-sm text-primary hover:underline disabled:opacity-50"
         >
           <span className="material-symbols-outlined text-base">attach_file</span>
           Add a file
@@ -136,7 +142,7 @@ function ResourceFilesField({
         <input
           ref={fileRef}
           type="file"
-          accept={RESOURCE_FILE_ACCEPT}
+          accept={COMMUNITY_FILE_ACCEPT}
           multiple
           onChange={(e) => pick(e.target.files)}
           className="sr-only"
@@ -330,6 +336,7 @@ const TYPE_ORDER: CommunityResourceType[] = COMMUNITY_RESOURCE_TYPES;
  *  resource". */
 function ResourceForm({
   communityId,
+  slug,
   resourceId,
   initialTitle = "",
   initialType = "tool",
@@ -342,6 +349,8 @@ function ResourceForm({
   onSubmit,
 }: {
   communityId: string;
+  /** For revalidating the page when an empty new entry is removed again. */
+  slug: string;
   /** Set only when editing a resource that already exists. Undefined for
    *  "Add resource". */
   resourceId?: string;
@@ -375,6 +384,56 @@ function ResourceForm({
   // path, and only if a retry is needed after a partial failure.
   const [savedResourceId, setSavedResourceId] = useState<string | null>(null);
 
+  // Files go straight to Storage after the resource is saved; the form stays
+  // open with their progress until every one is attached (or cancelled).
+  const uploads = useCommunityFileUploads(communityId);
+  const [uploading, setUploading] = useState(false);
+  const seenUpload = useRef(false);
+  const closeWhenSettled = useRef(false);
+
+  // When the uploads settle: something attached -> done. Nothing attached
+  // (every file cancelled, or refused before it started) -> a resource THIS
+  // form just created with no link is deleted again, so no empty titled entry
+  // is left behind; an edited resource is never deleted.
+  useEffect(() => {
+    if (!uploading) return;
+    if (uploads.items.length > 0) seenUpload.current = true;
+    const refusedEarly = !seenUpload.current && !!uploads.error;
+    if (!refusedEarly && (!seenUpload.current || uploads.unfinished > 0)) return;
+
+    setUploading(false);
+    seenUpload.current = false;
+    if (uploads.attached > 0) {
+      router.refresh();
+      onCancel();
+      return;
+    }
+    void (async () => {
+      const createdHere = !resourceId && !!savedResourceId;
+      const discard = shouldDiscardNewResource({ createdHere, hasLink: !!url.trim(), attached: 0, stillUploading: 0 });
+      if (discard && savedResourceId) {
+        const del = await deleteCommunityResourceAction(communityId, savedResourceId, slug);
+        if (del.ok) setSavedResourceId(null);
+        else console.error("ResourceForm: couldn't remove the empty entry", del.error);
+      } else {
+        router.refresh();
+      }
+      if (closeWhenSettled.current) {
+        onCancel();
+        return;
+      }
+      setError(uploads.error ?? (discard ? "The upload was cancelled, so nothing was added." : "Saved, but the file was not added."));
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploading, uploads.items.length, uploads.unfinished, uploads.attached, uploads.error]);
+
+  const cancel = () => {
+    if (!uploading) return onCancel();
+    // Stop what is still uploading; the effect above cleans up, then closes.
+    closeWhenSettled.current = true;
+    void uploads.cancelUnfinished();
+  };
+
   const removeExisting = async (fileId: string) => {
     setError(null);
     setRemovingExistingId(fileId);
@@ -386,7 +445,13 @@ function ResourceForm({
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (saving || !title.trim()) return;
+    if (saving || uploading || !title.trim()) return;
+    // Everything that could refuse a file is checked BEFORE anything is saved.
+    if (pendingFiles.length > 0) {
+      const problem = pendingFiles.map((f) => communityFileProblem(f.name, f.type, f.size)).find(Boolean);
+      if (problem) return setError(problem);
+      if (!getResumableUploadTarget()) return setError("Uploads aren't set up on this site.");
+    }
 
     setSaving(true);
     setError(null);
@@ -420,33 +485,16 @@ function ResourceForm({
       return;
     }
 
-    const stillPending: File[] = [];
-    let uploadError: string | null = null;
-    for (const file of pendingFiles) {
-      if (uploadError) {
-        stillPending.push(file);
-        continue;
-      }
-      const fd = new FormData();
-      fd.set("communityId", communityId);
-      fd.set("resourceId", id);
-      fd.set("file", file);
-      const res = await addCommunityResourceFileAction(fd);
-      if (!res.ok) {
-        uploadError = res.error;
-        stillPending.push(file);
-      }
+    setSaving(false);
+    if (pendingFiles.length === 0) {
+      router.refresh();
+      onCancel();
+      return;
     }
-    setPendingFiles(stillPending);
-
-    if (uploadError) {
-      setError(`Saved, but couldn't attach every file — ${uploadError}`);
-      setSaving(false);
-      return; // keep the form open so the remaining file(s) can be retried or removed
-    }
-
-    router.refresh();
-    onCancel();
+    closeWhenSettled.current = false;
+    setUploading(true);
+    uploads.start(id, pendingFiles);
+    setPendingFiles([]);
   };
 
   return (
@@ -489,7 +537,21 @@ function ResourceForm({
         existingFiles={existingFiles}
         onRemoveExisting={removeExisting}
         removingExistingId={removingExistingId}
+        disabled={uploading}
       />
+
+      {uploads.items.length > 0 && (
+        <ul className="flex flex-col gap-2" aria-label="Uploads">
+          {uploads.items.map((item) => (
+            <UploadRow
+              key={item.key}
+              item={item}
+              onRemove={() => void uploads.remove(item.key)}
+              onResume={() => uploads.resume(item.key)}
+            />
+          ))}
+        </ul>
+      )}
 
       <textarea
         value={description}
@@ -508,7 +570,7 @@ function ResourceForm({
       <div className="flex items-center justify-end gap-3">
         <button
           type="button"
-          onClick={onCancel}
+          onClick={cancel}
           disabled={saving}
           className="btn-outline px-4 py-2 rounded-lg font-label-sm text-label-sm disabled:opacity-50"
         >
@@ -516,10 +578,10 @@ function ResourceForm({
         </button>
         <button
           type="submit"
-          disabled={saving || !title.trim()}
+          disabled={saving || uploading || !title.trim()}
           className="btn-primary px-4 py-2 rounded-lg font-label-sm text-label-sm disabled:opacity-50"
         >
-          {saving ? busyLabel : submitLabel}
+          {saving ? busyLabel : uploading ? "Uploading…" : submitLabel}
         </button>
       </div>
     </form>
@@ -649,6 +711,7 @@ function ResourceItem({
     return (
       <ResourceForm
         communityId={communityId}
+        slug={slug}
         resourceId={resource.id}
         initialTitle={resource.title}
         initialType={resource.resource_type}
@@ -926,6 +989,7 @@ export default function ResourcesSection({
         {isAdmin && adding && (
           <ResourceForm
             communityId={communityId}
+            slug={slug}
             busyLabel="Adding…"
             submitLabel="Add"
             onCancel={() => setAdding(false)}

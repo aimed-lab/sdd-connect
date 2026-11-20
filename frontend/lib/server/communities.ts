@@ -59,6 +59,8 @@ import { MATCH_LIMIT, matchCommunityList, rankCommunities, type RankedCommunity 
 import { visibleCommunities } from "./communityVisibility";
 import type { ExploreItem } from "@/types/explore";
 import { canAddResource, type CommunityKind } from "./teams/teamRules";
+import { COMMUNITY_RESOURCE_FILES_BUCKET, checkStoredCommunityFile } from "./communityFileRules";
+import { isUuid } from "./promote/mediaFiles";
 
 export type Community = {
   id: string;
@@ -1926,17 +1928,10 @@ export async function deleteCommunityResource(
 // than an owner_id match — RLS enforces the identical rule underneath (see
 // the migration's own comments).
 
-export const COMMUNITY_RESOURCE_FILES_BUCKET = "community-resource-files";
-
-const MAX_RESOURCE_FILE_BYTES = 50 * 1024 * 1024; // 50 MB, same cap as showcase-media
-const RESOURCE_FILE_ALLOWED_MIME = new Set([
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "image/gif",
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation", // .pptx
-]);
+// The bucket name, the accepted types, the path shape and the checks on an
+// uploaded object live in lib/server/communityFileRules.ts (pure, shared with the
+// browser uploader).
+export { COMMUNITY_RESOURCE_FILES_BUCKET };
 
 const RESOURCE_FILE_SIGNED_URL_TTL_SECONDS = 60 * 10; // 10 minutes, matches showcase.ts's own TTL
 
@@ -2006,34 +2001,70 @@ async function listCommunityResourceFilesForCommunity(
   return byResource;
 }
 
-/** Attach one file to a resource as a community admin. Validates type/size
- *  in app code (belt-and-suspenders on top of the bucket's own
- *  allowed_mime_types/file_size_limit) and throws with a message the
- *  caller can show directly. */
-export async function addCommunityResourceFile(
-  communityId: string,
-  resourceId: string,
-  file: File
-): Promise<CommunityResourceFile> {
+/** Thrown for anything the person can fix or should know; safe to show. */
+export class CommunityFileError extends Error {}
+
+/** Record a file the browser has ALREADY uploaded to Storage (resumable TUS,
+ *  components/communities/useCommunityFileUploads.ts) and attach it to a
+ *  resource. Same shape as lib/server/projectFiles.ts:recordProjectFile.
+ *
+ *  Nothing the browser says is trusted except the original filename: the path
+ *  must be one buildCommunityFilePath makes for THIS community, the caller must
+ *  be an admin (or an active member of a team, as before), and the size, type and
+ *  uploader are read from Storage (checkStoredCommunityFile). An object that fails
+ *  a check is deleted, so nothing stays in Storage that no list shows; the
+ *  exceptions are a path outside this community's folder and an object someone
+ *  else uploaded, which are never touched. RLS on community_resource_files is the
+ *  real gate for the row (uploader = caller, resource in this community, admin or
+ *  team uploader). */
+export async function recordCommunityResourceFile(input: {
+  communityId: string;
+  resourceId: string;
+  path: string;
+  filename: string;
+}): Promise<CommunityResourceFile> {
   const { user, db } = await requireCurrentUser();
+  const { communityId, resourceId, path } = input;
+  if (!isUuid(communityId) || !isUuid(resourceId)) {
+    throw new CommunityFileError("That upload doesn't belong to this community.");
+  }
 
   const membership = await getMembership(communityId);
   const kind = await getCommunityKind(communityId);
   if (!membership.isAdmin && !(kind === "team" && membership.state === "active")) {
-    throw new Error("Only a community admin can attach a file.");
+    throw new CommunityFileError("Only a community admin can attach a file.");
   }
 
-  if (!file || file.size === 0) throw new Error("No file selected.");
-  if (!RESOURCE_FILE_ALLOWED_MIME.has(file.type)) throw new Error("Use PNG, JPEG, WebP, GIF, PDF or PPTX.");
-  if (file.size > MAX_RESOURCE_FILE_BYTES) throw new Error("File must be under 50 MB.");
+  const bucket = db.storage.from(COMMUNITY_RESOURCE_FILES_BUCKET);
+  const { data: existing } = await db.from("community_resource_files").select("id").eq("url", path).maybeSingle();
+  if (existing) throw new CommunityFileError("That file is already attached.");
 
-  const ext = (file.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "");
-  const path = `${communityId}/${crypto.randomUUID()}.${ext || "bin"}`;
+  const { data: info, error: infoError } = await bucket.info(path);
+  if (infoError || !info) {
+    throw new CommunityFileError("The upload wasn't found in storage. Please upload the file again.");
+  }
+  const raw = info as unknown as Record<string, unknown>;
+  const meta = (info.metadata ?? {}) as Record<string, unknown>;
+  const owner = (raw.ownerId ?? raw.owner ?? raw.owner_id ?? null) as string | null;
 
-  const { error: uploadError } = await db.storage
-    .from(COMMUNITY_RESOURCE_FILES_BUCKET)
-    .upload(path, file, { contentType: file.type, upsert: false });
-  if (uploadError) throw uploadError;
+  const check = checkStoredCommunityFile({
+    communityId,
+    path,
+    filename: input.filename,
+    sizeBytes: Number(info.size ?? meta.size),
+    storedType: String(info.contentType ?? meta.mimetype ?? meta.contentType ?? ""),
+    ownerId: typeof owner === "string" && owner ? owner : null,
+    callerId: user.id,
+  });
+
+  const refuse = async (message: string, deleteObject: boolean): Promise<never> => {
+    if (deleteObject) {
+      const { error: rmErr } = await bucket.remove([path]);
+      if (rmErr) console.error("community resource file cleanup failed", rmErr, path);
+    }
+    throw new CommunityFileError(message);
+  };
+  if (!check.ok) return refuse(check.message, check.deleteObject);
 
   const { data, error } = await db
     .from("community_resource_files")
@@ -2041,18 +2072,16 @@ export async function addCommunityResourceFile(
       resource_id: resourceId,
       community_id: communityId,
       added_by: user.id, // from the session, never the body
-      filename: file.name.slice(0, 200),
-      size_bytes: file.size,
+      filename: check.filename,
+      size_bytes: check.sizeBytes,
       url: path, // the storage PATH — see the field comment in the migration
     })
     .select("id, filename, size_bytes")
     .single();
 
   if (error || !data) {
-    // Roll back the just-uploaded object rather than leaving an orphan no
-    // one can ever see or remove (it has no DB row to list it by).
-    await db.storage.from(COMMUNITY_RESOURCE_FILES_BUCKET).remove([path]);
-    throw error ?? new Error("Couldn't save the attachment. Please try again.");
+    console.error("recordCommunityResourceFile insert failed", error);
+    return refuse("Couldn't attach the file. Please try again.", true);
   }
 
   return {

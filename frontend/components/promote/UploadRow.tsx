@@ -1,10 +1,11 @@
 "use client";
 
-// One file in an upload list (MediaUploader.tsx, QuickShare.tsx, and project
-// files in ProjectFilesSection.tsx): name, size,
+// One file in an upload list (MediaUploader.tsx, QuickShare.tsx, project files
+// in ProjectFilesSection.tsx, community and team files): name, size,
 // a progress bar while it uploads, Remove (or Cancel), Resume / Try again,
 // and the one-line label field. The label can be typed while the file is
 // still uploading; it is saved once the file is in (useResumableUploads.ts).
+// Without `labelPlaceholder` there is no label field (community files).
 
 import { MAX_MEDIA_LABEL_CHARS, formatFileSize } from "@/lib/server/promote/mediaFiles";
 import type { UploadItem } from "@/components/uploads/useResumableUploads";
@@ -24,9 +25,10 @@ export default function UploadRow({
   onResume,
 }: {
   item: UploadItem;
-  labelPlaceholder: string;
-  onLabelChange: (value: string) => void;
-  onLabelCommit: () => void;
+  /** Leave out for no label field. */
+  labelPlaceholder?: string;
+  onLabelChange?: (value: string) => void;
+  onLabelCommit?: () => void;
   onRemove: () => void;
   onResume: () => void;
 }) {
@@ -93,7 +95,7 @@ export default function UploadRow({
         </p>
       )}
 
-      {item.status !== "failed" && (
+      {item.status !== "failed" && labelPlaceholder !== undefined && (
         <div>
           <label className="sr-only" htmlFor={`file-label-${item.key}`}>
             Label for {item.name}
@@ -105,8 +107,8 @@ export default function UploadRow({
               value={item.label}
               maxLength={MAX_MEDIA_LABEL_CHARS}
               placeholder={labelPlaceholder}
-              onChange={(e) => onLabelChange(e.target.value)}
-              onBlur={onLabelCommit}
+              onChange={(e) => onLabelChange?.(e.target.value)}
+              onBlur={() => onLabelCommit?.()}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
