@@ -12,6 +12,7 @@ const base = {
   tasksDone: 0,
   tasksTotal: 3,
   hasFolder: true,
+  sharedFileCount: 0 as number | null,
   announcementsNew: 2,
   memberCount: 6,
   nextDateShown: "Nov 13" as string | null,
@@ -33,9 +34,13 @@ test("Tasks, not a finalist: counts every list, no due date, and no line with no
   assert.equal(lines({ ...other, tasksDone: 0, tasksTotal: 0 }).tasks, null);
 });
 
-test("Files: linked or not", () => {
-  assert.equal(lines().files, "Open your Box folder");
-  assert.equal(lines({ hasFolder: false }).files, "Not linked yet");
+test("Files: shared files with their number, and the Box folder when linked", () => {
+  assert.equal(lines().files, "Shared files and Box folder");
+  assert.equal(lines({ hasFolder: false }).files, "Shared files");
+  assert.equal(lines({ sharedFileCount: 1 }).files, "1 shared file · Box folder");
+  assert.equal(lines({ sharedFileCount: 4, hasFolder: false }).files, "4 shared files");
+  // count unknown (table missing, error): no number
+  assert.equal(lines({ sharedFileCount: null }).files, "Shared files and Box folder");
 });
 
 test("Announcements: New this week (the badge has the count), or Nothing new", () => {

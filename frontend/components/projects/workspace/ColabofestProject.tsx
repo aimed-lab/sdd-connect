@@ -85,6 +85,7 @@ export default function ColabofestProject({
   finalistTotal,
   progress,
   sharedFolderUrl,
+  sharedFileCount = null,
   filesNode,
   announcements,
   announcementsNew,
@@ -112,6 +113,8 @@ export default function ColabofestProject({
   finalistTotal: number;
   progress: { done: number; total: number; percent: number };
   sharedFolderUrl: string | null;
+  /** How many files are shared on the Files tab (null: unknown). */
+  sharedFileCount?: number | null;
   /** Shared files (ProjectFilesSection), shown first in the Files view. */
   filesNode?: React.ReactNode;
   /** The newest announcements first (pinned first); the home shows three. */
@@ -144,6 +147,7 @@ export default function ColabofestProject({
     tasksDone: progress.done,
     tasksTotal: progress.total,
     hasFolder: !!sharedFolderUrl,
+    sharedFileCount,
     announcementsNew,
     memberCount,
     nextDateShown: nextDate?.shown ?? null,

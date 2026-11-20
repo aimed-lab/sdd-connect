@@ -19,6 +19,8 @@ export function tileStatusLines(a: {
   tasksDone: number;
   tasksTotal: number;
   hasFolder: boolean;
+  /** Files shared on the Files tab (project_files), or null when the count couldn't be read. */
+  sharedFileCount: number | null;
   /** Announcements posted in the last week. */
   announcementsNew: number;
   memberCount: number;
@@ -37,13 +39,24 @@ export function tileStatusLines(a: {
   }
   return {
     tasks,
-    files: a.hasFolder ? "Open your Box folder" : "Not linked yet",
+    files: filesLine(a.sharedFileCount, a.hasFolder),
     // The tile's badge already shows the count ("2 new").
     announcements: a.announcementsNew > 0 ? "New this week" : "Nothing new",
     team: `${a.memberCount} ${a.memberCount === 1 ? "member" : "members"}`,
     timeline: a.nextDateShown ? `Next: ${a.nextDateShown}` : null,
     manage: "Links and settings",
   };
+}
+
+/** The Files tile's line: the shared files (with their number when there are any) and
+ *  the Box folder when one is linked. */
+function filesLine(count: number | null, hasFolder: boolean): string {
+  const n = count ?? 0;
+  if (n > 0) {
+    const files = `${n} shared ${n === 1 ? "file" : "files"}`;
+    return hasFolder ? `${files} · Box folder` : files;
+  }
+  return hasFolder ? "Shared files and Box folder" : "Shared files";
 }
 
 /** "More you can do here": four links to the rest of the site. `icon` is a Material Symbols name. */

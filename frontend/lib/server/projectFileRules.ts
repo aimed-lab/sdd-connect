@@ -7,71 +7,21 @@
 // can import it as well as lib/server/projectFiles.ts.
 
 import { buildMediaObjectPath, displayFileName, fileExtension, isMediaObjectPathFor } from "./promote/mediaFiles.ts";
+import { FILE_TYPE_RULES, acceptListFor, checkFileTypeFor, type FileKind } from "./uploads/fileTypes.ts";
 
 export const PROJECT_FILES_BUCKET = "project-files";
 
 /** 50 MB, the bucket's own file_size_limit. */
 export const MAX_PROJECT_FILE_BYTES = 50 * 1024 * 1024;
 
-export type ProjectFileKind = "image" | "pdf" | "slides" | "document" | "spreadsheet";
+export type ProjectFileKind = FileKind;
 
-type TypeRule = { kind: ProjectFileKind; contentType: string; alsoReported: string[] };
-
-// Accepted extensions, the standard content type each one is uploaded with,
-// and the other types browsers are known to report for it. Office files are
-// reported inconsistently (e.g. "application/vnd.ms-office", or a zip type for
-// the newer formats on some systems), so the extension decides and the
-// reported type only has to be one of these, or empty / generic.
-const OOXML_ZIP = ["application/zip", "application/x-zip-compressed", "application/x-zip"];
-const MS_OFFICE = ["application/vnd.ms-office", "application/x-ole-storage", "application/cdfv2"];
-
-const RULES: Record<string, TypeRule> = {
-  png: { kind: "image", contentType: "image/png", alsoReported: [] },
-  jpg: { kind: "image", contentType: "image/jpeg", alsoReported: ["image/pjpeg", "image/jpg"] },
-  jpeg: { kind: "image", contentType: "image/jpeg", alsoReported: ["image/pjpeg", "image/jpg"] },
-  gif: { kind: "image", contentType: "image/gif", alsoReported: [] },
-  webp: { kind: "image", contentType: "image/webp", alsoReported: [] },
-  pdf: { kind: "pdf", contentType: "application/pdf", alsoReported: ["application/x-pdf", "application/acrobat"] },
-  ppt: {
-    kind: "slides",
-    contentType: "application/vnd.ms-powerpoint",
-    alsoReported: ["application/mspowerpoint", "application/powerpoint", "application/x-mspowerpoint", ...MS_OFFICE],
-  },
-  pptx: {
-    kind: "slides",
-    contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    alsoReported: ["application/vnd.ms-powerpoint", ...OOXML_ZIP, ...MS_OFFICE],
-  },
-  doc: {
-    kind: "document",
-    contentType: "application/msword",
-    alsoReported: ["application/x-msword", "application/doc", ...MS_OFFICE],
-  },
-  docx: {
-    kind: "document",
-    contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    alsoReported: ["application/msword", ...OOXML_ZIP, ...MS_OFFICE],
-  },
-  xls: {
-    kind: "spreadsheet",
-    contentType: "application/vnd.ms-excel",
-    alsoReported: ["application/excel", "application/x-excel", "application/x-msexcel", ...MS_OFFICE],
-  },
-  xlsx: {
-    kind: "spreadsheet",
-    contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    alsoReported: ["application/vnd.ms-excel", ...OOXML_ZIP, ...MS_OFFICE],
-  },
-};
-
-/** Reported types that say nothing about the file. */
-const GENERIC = new Set(["", "application/octet-stream", "binary/octet-stream", "application/unknown"]);
+/** Every extension the shared rules know: images, PDF, PowerPoint, Word and
+ *  Excel (lib/server/uploads/fileTypes.ts). */
+const PROJECT_FILE_EXTENSIONS = Object.keys(FILE_TYPE_RULES);
 
 /** The file picker's `accept`: extensions and the standard types. */
-export const PROJECT_FILE_ACCEPT = [
-  ...Object.keys(RULES).map((ext) => `.${ext}`),
-  ...Array.from(new Set(Object.values(RULES).map((r) => r.contentType))),
-].join(",");
+export const PROJECT_FILE_ACCEPT = acceptListFor(PROJECT_FILE_EXTENSIONS);
 
 export const PROJECT_FILE_TYPES_LABEL = "Images, PDF, PowerPoint, Word or Excel";
 
@@ -79,25 +29,19 @@ export type FileTypeCheck =
   | { ok: true; kind: ProjectFileKind; contentType: string }
   | { ok: false; message: string };
 
-function normalType(type: string | null | undefined): string {
-  return (type ?? "").split(";")[0].trim().toLowerCase();
-}
-
 /** Is this file accepted? The extension must be one of the allowed ones, and
  *  the type the browser (or Storage) reports must fit that extension, or be
  *  empty / generic. On success, `contentType` is the standard type for the
  *  extension: the one to upload with and the one Storage must report back. */
 export function checkProjectFileType(filename: string, reportedType: string | null | undefined): FileTypeCheck {
   const name = displayFileName(filename);
-  const rule = RULES[fileExtension(filename)];
-  if (!rule) {
-    return { ok: false, message: `"${name}" can't be shared here. Use ${PROJECT_FILE_TYPES_LABEL.toLowerCase()} files.` };
+  const t = checkFileTypeFor(filename, reportedType, PROJECT_FILE_EXTENSIONS);
+  if (!t.ok) {
+    return t.reason === "extension"
+      ? { ok: false, message: `"${name}" can't be shared here. Use ${PROJECT_FILE_TYPES_LABEL.toLowerCase()} files.` }
+      : { ok: false, message: `"${name}" doesn't look like the kind of file its name says it is.` };
   }
-  const type = normalType(reportedType);
-  if (!GENERIC.has(type) && type !== rule.contentType && !rule.alsoReported.includes(type)) {
-    return { ok: false, message: `"${name}" doesn't look like the kind of file its name says it is.` };
-  }
-  return { ok: true, kind: rule.kind, contentType: rule.contentType };
+  return { ok: true, kind: t.kind, contentType: t.contentType };
 }
 
 /** The message for a file the uploader refuses before sending anything, or
@@ -112,7 +56,7 @@ export function projectFileProblem(filename: string, reportedType: string | null
 
 /** What kind a stored file is, by its name: decides the icon. */
 export function projectFileKind(filename: string): ProjectFileKind {
-  return RULES[fileExtension(filename)]?.kind ?? "document";
+  return FILE_TYPE_RULES[fileExtension(filename)]?.kind ?? "document";
 }
 
 /** Icon and colours for each kind. No green tints: the page's accent is UAB

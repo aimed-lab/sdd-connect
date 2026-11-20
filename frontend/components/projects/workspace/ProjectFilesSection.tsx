@@ -14,6 +14,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import ConfirmDialog from "@/components/promote/ConfirmDialog";
 import UploadRow from "@/components/promote/UploadRow";
 import { useResumableUploads } from "@/components/uploads/useResumableUploads";
 import { recordProjectFileAction, removeProjectFileAction, type ProjectUploadMedia } from "@/app/projects/[id]/actions";
@@ -44,6 +45,8 @@ export default function ProjectFilesSection({
   const inputRef = useRef<HTMLInputElement>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
+  /** The file whose Remove is waiting for confirmation (ConfirmDialog). */
+  const [confirming, setConfirming] = useState<ProjectFile | null>(null);
 
   const uploads = useResumableUploads<ProjectUploadMedia>({
     bucket: PROJECT_FILES_BUCKET,
@@ -79,7 +82,6 @@ export default function ProjectFilesSection({
 
   const removeFile = async (f: ProjectFile) => {
     if (removing) return;
-    if (!window.confirm(`Remove "${f.title}" from the project? Members will no longer be able to open it.`)) return;
     setRemoving(f.id);
     setRemoveError(null);
     const res = await removeProjectFileAction(projectId, f.id);
@@ -198,7 +200,7 @@ export default function ProjectFilesSection({
                 {f.canRemove && (
                   <button
                     type="button"
-                    onClick={() => void removeFile(f)}
+                    onClick={() => setConfirming(f)}
                     disabled={removing === f.id}
                     className="shrink-0 font-label-md text-label-md text-error hover:underline disabled:opacity-50"
                     aria-label={`Remove ${f.title}`}
@@ -216,6 +218,16 @@ export default function ProjectFilesSection({
         <p className="mt-3 font-body-sm text-body-sm text-error" role="alert">
           {removeError}
         </p>
+      )}
+
+      {confirming && (
+        <ConfirmDialog
+          heading="Remove this file?"
+          message={`"${confirming.title}" will be removed from the project. Members will no longer be able to open it.`}
+          confirmLabel="Remove file"
+          onConfirm={() => removeFile(confirming)}
+          onClose={() => setConfirming(null)}
+        />
       )}
     </section>
   );

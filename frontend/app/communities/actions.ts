@@ -13,7 +13,7 @@ import { UnauthorizedError } from "@/lib/auth";
 import { createCommunityEvent, deleteCommunityEvent, updateCommunityEvent } from "@/lib/server/communityEvents";
 import {
   addCommunityMemberByEmail,
-  addCommunityResourceFile,
+  CommunityFileError,
   approveMembership,
   changeCommunityMemberRole,
   createAnnouncement,
@@ -29,6 +29,7 @@ import {
   rejectMembership,
   setShowPinnedToPublic,
   removeCommunityMember,
+  recordCommunityResourceFile,
   removeCommunityResourceFile,
   updateAnnouncement,
   updateCommunityExploreConfig,
@@ -577,39 +578,34 @@ export async function deleteCommunityResourceAction(
 
 // ── resource files ───────────────────────────────────────────────────────
 //
-// FormData (not JSON) is used here specifically because a File object can
-// only reach a Server Action that way — same reasoning as
-// app/promote/actions.ts's media actions.
+// The bytes never come through here: the browser uploads straight to Storage
+// (resumable TUS, components/communities/useCommunityFileUploads.ts), then this
+// records the object. A Server Action body is capped at 1 MB by default, which is
+// why the old FormData upload failed for real files.
 
 export type ResourceFileActionResult =
   | { ok: true; file: CommunityResourceFile }
   | { ok: false; error: string };
 
-/** Attach one file to a resource. Admin-only — see
- *  addCommunityResourceFile's own comment on the RLS gate. */
-export async function addCommunityResourceFileAction(form: FormData): Promise<ResourceFileActionResult> {
-  const communityId = form.get("communityId");
-  const resourceId = form.get("resourceId");
-  const file = form.get("file");
-
-  if (typeof communityId !== "string" || !communityId) {
-    return { ok: false, error: "Missing community." };
+/** Record a file already uploaded to the community's folder and attach it to a
+ *  resource. lib/server/communities.ts:recordCommunityResourceFile checks it. */
+export async function recordCommunityResourceFileAction(input: {
+  communityId: string;
+  resourceId: string;
+  path: string;
+  filename: string;
+}): Promise<ResourceFileActionResult> {
+  if (!input?.communityId || !input.resourceId || !input.path || !input.filename) {
+    return { ok: false, error: "Missing file." };
   }
-  if (typeof resourceId !== "string" || !resourceId) {
-    return { ok: false, error: "Missing resource." };
-  }
-  if (!(file instanceof File) || file.size === 0) {
-    return { ok: false, error: "No file selected." };
-  }
-
   try {
-    const attached = await addCommunityResourceFile(communityId, resourceId, file);
-    return { ok: true, file: attached };
+    const file = await recordCommunityResourceFile(input);
+    return { ok: true, file };
   } catch (e) {
     if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to attach a file." };
-    const message = e instanceof Error ? e.message : "Couldn't attach that file. Please try again.";
-    console.error("addCommunityResourceFileAction failed", e);
-    return { ok: false, error: message };
+    if (e instanceof CommunityFileError) return { ok: false, error: e.message };
+    console.error("recordCommunityResourceFileAction failed", e);
+    return { ok: false, error: "Couldn't attach that file. Please try again." };
   }
 }
 

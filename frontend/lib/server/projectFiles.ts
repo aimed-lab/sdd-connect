@@ -119,6 +119,23 @@ export async function listProjectFiles(projectId: string, names: Record<string, 
   return { status: "ok", files: ((res.data ?? []) as Row[]).map((r) => toFile(r, user.id, role, names)) };
 }
 
+/** How many files are shared in the project, for the Files tile on a CollaboFest
+ *  home. A head-only count (no rows sent); RLS means a non-member gets 0. null when
+ *  it can't be read (for example the table isn't there yet), never an error. */
+export async function countProjectFiles(projectId: string): Promise<number | null> {
+  if (!isUuid(projectId)) return null;
+  const { db } = await requireCurrentUser();
+  const { count, error } = await db
+    .from("project_files")
+    .select("id", { count: "exact", head: true })
+    .eq("project_id", projectId);
+  if (error) {
+    if (error.code !== "42P01") console.error("countProjectFiles failed", error);
+    return null;
+  }
+  return count ?? 0;
+}
+
 /** Record a file the browser has ALREADY uploaded to Storage, as a member of
  *  the project. An object that fails a check is deleted, so nothing stays in
  *  Storage that no list shows. */

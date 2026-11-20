@@ -27,6 +27,7 @@
 
 import { assigneeAllowed, isListKey, parseDueDate, parseGithubUrl, type ListKey } from "@/lib/server/projectWorkspace/status";
 import { getCurrentUser, getDb, requireCurrentUser, type Db } from "@/lib/auth";
+import { programLeadRefusal } from "@/lib/server/projectWorkspace/memberRules";
 import type { CreateProjectInput, MyProjectSummary } from "@/lib/projectTypes";
 import { classifyChecklistItem } from "@/lib/server/checklistClassify";
 import { removeAllProjectFileObjects } from "@/lib/server/projectFiles";
@@ -312,14 +313,20 @@ export type DeleteProjectResult = { status: "ok" } | { status: "error"; error: s
 async function loadProjectGate(
   db: Db,
   projectId: string
-): Promise<{ creatorId: string; deadline: string | null } | null> {
+): Promise<{ creatorId: string; deadline: string | null; program: string | null } | null> {
   const { data, error } = await db
     .from("projects")
-    .select("lead_id, deadline")
+    .select("lead_id, deadline, program")
     .eq("id", projectId)
     .maybeSingle();
   if (error || !data) return null;
-  return { creatorId: data.lead_id as string, deadline: (data.deadline as string | null) ?? null };
+  return {
+    creatorId: data.lead_id as string,
+    deadline: (data.deadline as string | null) ?? null,
+    // Set for a program project (e.g. 'colabofest_2026'): leads there manage plain
+    // members only (lib/server/projectWorkspace/memberRules.ts).
+    program: (data.program as string | null) ?? null,
+  };
 }
 
 // Internal only — "is this uid A lead (any lead) of this project", the
@@ -828,6 +835,8 @@ export async function addProjectMember(
   if (!callerIsLead && !callerIsManager) {
     return { status: "forbidden", error: "Only a project lead or the SPARC team can add members." };
   }
+  const addRefusal = programLeadRefusal({ program: gate.program, callerRole: callerIsLead ? "lead" : "manager", change: { kind: "add", role } });
+  if (addRefusal) return { status: "forbidden", error: addRefusal };
   if (callerIsManager) role = "member";
 
   const normalized = email.trim().toLowerCase();
@@ -927,6 +936,13 @@ export async function removeProjectMember(
   }
   if (!member) return { status: "error", error: "That member no longer exists." };
 
+  const removeRefusal = programLeadRefusal({
+    program: gate.program,
+    callerRole: callerIsLead ? "lead" : "manager",
+    change: { kind: "remove", targetRole: member.role as string },
+  });
+  if (removeRefusal) return { status: "forbidden", error: removeRefusal };
+
   if (member.role === "lead") {
     return { status: "forbidden", error: "A lead can't be removed — they'd need to step down first." };
   }
@@ -971,6 +987,8 @@ export async function promoteProjectMember(
   if (!(await isCallerLead(db, projectId, user.id))) {
     return { status: "forbidden", error: "Only a project lead can promote members." };
   }
+  const promoteRefusal = programLeadRefusal({ program: gate.program, callerRole: "lead", change: { kind: "promote" } });
+  if (promoteRefusal) return { status: "forbidden", error: promoteRefusal };
 
   const { data: member, error: memberErr } = await db
     .from("project_members")
@@ -1692,6 +1710,8 @@ export async function setMemberRole(
   if (!(await isCallerLead(db, projectId, user.id))) {
     return { status: "forbidden", error: "Only a project lead can change roles." };
   }
+  const roleRefusal = programLeadRefusal({ program: gate.program, callerRole: "lead", change: { kind: "set_role" } });
+  if (roleRefusal) return { status: "forbidden", error: roleRefusal };
 
   const { data: member, error: memberErr } = await db
     .from("project_members")
