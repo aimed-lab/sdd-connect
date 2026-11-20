@@ -6,7 +6,9 @@
 // input. Nothing is created here: a wiki page still goes through the panel's
 // usual picker and confirm step.
 //
-// No runtime imports, so `npm test` covers parseAssistantRequest.
+// Pure (its only import, actionIntent.ts, is pure too), so `npm test` covers it.
+
+import { hasEmailAddress } from "./actionIntent.ts";
 
 export const ASSISTANT_EVENT = "sdd:assistant";
 
@@ -86,3 +88,82 @@ export function shownUserText(content: string): string {
 
 /** The message behind the dashed "New wiki page" card. */
 export const START_LIVING_PAGE_MESSAGE = "I'd like to create a wiki page for my research.";
+
+// ── text a person just typed into an Explore search box ─────────────────────
+//
+// Everything above is for messages OTHER parts of the page send in (chips, starters,
+// "Follow this topic", links): the panel sends them as non-typed, so they are never
+// read for actions (add a member, add a file). This is the ONE exception, kept
+// separate on purpose:
+//   * its own event name (TYPED_SEARCH_EVENT), not ASSISTANT_EVENT, so a request built
+//     for the generic bridge can never be read as typed;
+//   * only components/explore/QuestionBox.tsx calls handOffTypedSearch, from its form
+//     submit (never from its example chips);
+//   * it only carries text that contains an email address (the one reason it exists:
+//     such text must not become /explore/<text>); anything else is dropped;
+//   * when the panel is not on this page (the home page), the text waits in
+//     sessionStorage for at most HANDOFF_TTL_MS and is read once, on /explore.
+
+export const TYPED_SEARCH_EVENT = "sdd:assistant-typed-search";
+export const TYPED_SEARCH_STORAGE_KEY = "sdd.assistant.typedSearch";
+export const HANDOFF_TTL_MS = 60_000;
+
+export type TypedSearchHandoff = { text: string };
+
+/** A hand-off from event data, or null. Requires source "search_box" and text with an
+ *  email address. */
+export function parseTypedSearchHandoff(raw: unknown): TypedSearchHandoff | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+  if (r.source !== "search_box") return null;
+  const text = typeof r.text === "string" ? r.text.trim().slice(0, MAX_TEXT) : "";
+  if (!text || !hasEmailAddress(text)) return null;
+  return { text };
+}
+
+/** A hand-off stored for the next page, or null when it is missing, malformed or older
+ *  than HANDOFF_TTL_MS. */
+export function parseStoredTypedSearch(stored: string | null, now: number): TypedSearchHandoff | null {
+  if (!stored) return null;
+  try {
+    const v = JSON.parse(stored) as { at?: unknown };
+    const at = typeof v.at === "number" ? v.at : NaN;
+    if (!Number.isFinite(at) || now - at < 0 || now - at > HANDOFF_TTL_MS) return null;
+    return parseTypedSearchHandoff(v);
+  } catch {
+    return null;
+  }
+}
+
+/** Should this search-box text go to the assistant instead of becoming a search? */
+export function shouldHandOffSearch(text: string): boolean {
+  return hasEmailAddress(text);
+}
+
+/** From a search box's submit: give the typed text to the assistant panel. With the
+ *  panel on this page, an event; otherwise it waits (once, briefly) for /explore. */
+export function handOffTypedSearch(text: string, panelOnThisPage: boolean): void {
+  if (typeof window === "undefined" || !shouldHandOffSearch(text)) return;
+  const detail = { source: "search_box", text: text.trim().slice(0, MAX_TEXT) };
+  if (panelOnThisPage) {
+    window.dispatchEvent(new CustomEvent(TYPED_SEARCH_EVENT, { detail }));
+    return;
+  }
+  try {
+    window.sessionStorage.setItem(TYPED_SEARCH_STORAGE_KEY, JSON.stringify({ ...detail, at: Date.now() }));
+  } catch {
+    // Storage blocked: the panel just opens without the text.
+  }
+}
+
+/** Read and remove a waiting hand-off (the panel, on mount). */
+export function takeStoredTypedSearch(): TypedSearchHandoff | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const stored = window.sessionStorage.getItem(TYPED_SEARCH_STORAGE_KEY);
+    window.sessionStorage.removeItem(TYPED_SEARCH_STORAGE_KEY);
+    return parseStoredTypedSearch(stored, Date.now());
+  } catch {
+    return null;
+  }
+}

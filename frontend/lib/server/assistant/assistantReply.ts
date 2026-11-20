@@ -19,6 +19,7 @@ export const CHOICE_INFO: Record<Visibility, { label: string; line: string }> = 
 
 import type { AnswerExtras } from "./assistantAnswer.ts";
 import { sanitizeExtras } from "./assistantAnswer.ts";
+import { hasEmailAddress } from "./actionIntent.ts";
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
 
@@ -196,7 +197,9 @@ export function buildAssistantContext(raw: unknown): {
   communities_checked?: true;
 } {
   const ctx = isRecord(raw) ? raw : {};
-  const query = typeof ctx.query === "string" ? ctx.query.trim().slice(0, MAX_SEED_CHARS) : "";
+  const topic = typeof ctx.query === "string" ? ctx.query.trim().slice(0, MAX_SEED_CHARS) : "";
+  // A page topic with an email address in it is never sent to the backend.
+  const query = hasEmailAddress(topic) ? "" : topic;
   return {
     ...(query ? { query } : {}),
     ...(ctx.page_created === true ? { page_created: true as const } : {}),
@@ -310,7 +313,9 @@ export function exploreQueryFromPath(pathname: string | null | undefined): strin
   const m = /^\/explore\/([^/]+)$/.exec(pathname ?? "");
   if (!m || m[1] === "podcast") return "";
   try {
-    return decodeURIComponent(m[1]).trim().slice(0, 200);
+    const q = decodeURIComponent(m[1]).trim().slice(0, 200);
+    // /explore/<text with an email> is never a search, so never the page's topic.
+    return hasEmailAddress(q) ? "" : q;
   } catch {
     return "";
   }

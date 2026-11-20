@@ -4,9 +4,20 @@
 // default, or Papers, Preprints, Clinical trials, ...) and optional example
 // topic chips. Submitting calls onSubmit(topic, scope); the pages send that to
 // scopeHref() (lib/server/explore/exploreLayout.ts).
+//
+// TEXT WITH AN EMAIL ADDRESS IS NEVER A SEARCH: typed and submitted here, it is handed
+// to the assistant panel as the person's own typed message (handOffTypedSearch,
+// lib/server/assistant/assistantBridge.ts), so "add x@y.org to a team" runs the
+// add-member flow there, and onSubmit is not called: no /explore/<text> URL, no search.
+// Only the typed box does this, never the example chips. On a page without the panel
+// (the home page) the text waits briefly and the page moves to /explore, where the
+// panel picks it up.
 
 import { useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { SCOPES, type ScopeKey } from "@/lib/server/explore/exploreLayout";
+import { handOffTypedSearch, shouldHandOffSearch } from "@/lib/server/assistant/assistantBridge";
+import { assistantAvailableOn } from "@/lib/server/assistant/assistantReply";
 
 export default function QuestionBox({
   initial = "",
@@ -26,6 +37,9 @@ export default function QuestionBox({
 }) {
   const [value, setValue] = useState(initial);
   const [scope, setScope] = useState<ScopeKey>(initialScope);
+  const [handedOff, setHandedOff] = useState(false);
+  const pathname = usePathname();
+  const router = useRouter();
 
   return (
     <section className="max-w-3xl">
@@ -33,13 +47,26 @@ export default function QuestionBox({
         onSubmit={(e) => {
           e.preventDefault();
           const q = value.trim();
-          if (q) onSubmit(q, scope);
+          if (!q) return;
+          if (shouldHandOffSearch(q)) {
+            const panelHere = assistantAvailableOn(pathname);
+            handOffTypedSearch(q, panelHere);
+            setValue("");
+            setHandedOff(true);
+            if (!panelHere) router.push("/explore");
+            return;
+          }
+          setHandedOff(false);
+          onSubmit(q, scope);
         }}
         className="relative"
       >
         <input
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => {
+            setValue(e.target.value);
+            if (handedOff) setHandedOff(false);
+          }}
           type="text"
           aria-label="Your question"
           placeholder={placeholder}
@@ -54,6 +81,11 @@ export default function QuestionBox({
           <span className="hidden sm:inline">Ask a question</span>
         </button>
       </form>
+      {handedOff && (
+        <p className="mt-2 font-body-sm text-body-sm text-secondary" role="status">
+          Explore doesn&rsquo;t search email addresses, so the assistant has it. Check the panel on the right.
+        </p>
+      )}
 
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-3">
         {showScope && (
