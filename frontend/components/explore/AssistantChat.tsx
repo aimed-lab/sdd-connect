@@ -97,6 +97,12 @@ import {
 import { listMyTeamsAction } from "@/app/teams/actions";
 import { createCommunityAction, joinCommunityAction } from "@/app/communities/actions";
 import { ASSISTANT_EVENT, getPageTeam, parseAssistantRequest, shownUserText, type AssistantRequest, type AssistantTeam } from "@/lib/server/assistant/assistantBridge";
+import {
+  TYPED_SEARCH_EVENT,
+  parseTypedSearchHandoff,
+  takeStoredTypedSearch,
+  type TypedSearchHandoff,
+} from "@/lib/server/assistant/assistantBridge";
 import { canCreateCommunityAction } from "@/app/communities/actions";
 import { TEAM_VISIBLE_NOTE, teamSlugFromPath, teamTopicFromMessage } from "@/lib/server/teams/teamRules";
 import {
@@ -755,6 +761,40 @@ export default function AssistantChat() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [external, restored, typing, authLoading, user]);
+
+  // Text the person just typed into an Explore search box that had an email address
+  // in it (components/explore/QuestionBox.tsx). The ONE message from outside the panel
+  // that counts as typed: it has its own event (never ASSISTANT_EVENT above, which
+  // chips, starters and links use and which is always sent as not typed), it only
+  // carries text with an email address, and it is sent with typed: true so the
+  // add-member flow reads it exactly as if it were typed here. From the home page it
+  // waits in sessionStorage for a minute and is read once, here.
+  const [typedSearch, setTypedSearch] = useState<TypedSearchHandoff | null>(null);
+  // The panel stays mounted across pages (root layout), so a waiting hand-off is read
+  // when the person arrives on a page that has the panel, not only on first load.
+  useEffect(() => {
+    if (!available) return;
+    const stored = takeStoredTypedSearch();
+    if (stored) setTypedSearch(stored);
+  }, [available]);
+  useEffect(() => {
+    const on = (e: Event) => {
+      const h = parseTypedSearchHandoff((e as CustomEvent).detail);
+      if (h) setTypedSearch(h);
+    };
+    window.addEventListener(TYPED_SEARCH_EVENT, on);
+    return () => window.removeEventListener(TYPED_SEARCH_EVENT, on);
+  }, []);
+  useEffect(() => {
+    if (!typedSearch || !restored || typing || authLoading) return;
+    const h = typedSearch;
+    setTypedSearch(null);
+    setOpen(true);
+    // Signed out: the panel asks them to sign in. Nothing is sent.
+    if (!user) return;
+    void send(h.text, { typed: true, stay: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typedSearch, restored, typing, authLoading, user]);
 
   // A draft needs to know who is asking: only site admins may start a
   // community, so everyone else's draft is a team.

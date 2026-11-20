@@ -7,6 +7,7 @@ import {
   RATE_LIMITED_MESSAGE,
   parseExploreBody,
 } from "@/lib/server/searchRequest";
+import { EXPLORE_EMAIL_MESSAGE, exploreTextHasEmail } from "@/lib/server/explore/emailGuard";
 
 // The request side of /api/explore and /api/explore/stream: request limits,
 // body parsing, the project-derived input and the personalized landing-feed
@@ -37,6 +38,11 @@ export async function buildExplorePayload(req: Request, limiter: RateLimiter): P
   const parsed = parseExploreBody(raw);
   if (!parsed.ok) {
     return { ok: false, status: 400, message: parsed.message };
+  }
+  // Never search an email address (the search boxes hand such text to the assistant;
+  // this is the backstop for anything else). Refused before any backend call.
+  if (exploreTextHasEmail(parsed.input)) {
+    return { ok: false, status: 400, message: EXPLORE_EMAIL_MESSAGE };
   }
   let input = parsed.input;
   const { personalize, projectId, sinceYear, statusFilter, onlyKinds } = parsed;

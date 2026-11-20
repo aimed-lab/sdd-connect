@@ -263,7 +263,10 @@ test("AssistantChat: email messages are routed before any backend call; only typ
   assert.ok(!src.includes("content: ADD_MEMBER_REPLY"));
   // Only the input box sends with typed: true.
   const typedCalls = src.match(/send\([^)]*typed: true/g) ?? [];
-  assert.equal(typedCalls.length, 2); // form submit and Enter
+  // form submit and Enter, plus the one search-box hand-off (TYPED_SEARCH_EVENT)
+  assert.equal(typedCalls.length, 3);
+  assert.equal((src.match(/send\(input, \{ typed: true \}\)/g) ?? []).length, 2);
+  assert.match(src, /void send\(h\.text, \{ typed: true, stay: true \}\)/);
   assert.match(src, /void send\(input, \{ typed: true \}\)/);
   for (const other of ["send(q)", "send(st.text)", "send(text)", "send(CHOICE_INFO[v].label)", "send(req.text, { stay: req.stay })"]) {
     assert.ok(src.includes(other), other);
