@@ -73,6 +73,16 @@ import {
 import type { ExploreResponse, ExploreSection } from "@/types/explore";
 import { TeamDraftCard, TeamListCard, type TeamListState } from "@/components/explore/TeamAssistantCards";
 import { detectTeamIntent, teamDraftReply, teamListReply, type TeamIntent } from "@/lib/server/assistant/teamIntent";
+import {
+  EMAIL_HELP_REPLY,
+  addMemberLookingReply,
+  addMemberReplyFor,
+  messagesForResearch,
+  parseAddMemberIntent,
+  routeForMessage,
+  type AddMemberIntent,
+} from "@/lib/server/assistant/actionIntent";
+import { AddMemberCard, extractAddMemberIntent } from "@/components/explore/ActionCards";
 import { listMyTeamsAction } from "@/app/teams/actions";
 import { createCommunityAction, joinCommunityAction } from "@/app/communities/actions";
 import { ASSISTANT_EVENT, getPageTeam, parseAssistantRequest, shownUserText, type AssistantRequest, type AssistantTeam } from "@/lib/server/assistant/assistantBridge";
@@ -330,6 +340,8 @@ export default function AssistantChat() {
   // the card under an assistant message, and the list once it is fetched.
   const [teamCards, setTeamCards] = useState<Record<number, TeamIntent>>({});
   const [teamLists, setTeamLists] = useState<Record<number, TeamListState>>({});
+  // "add <email> to <team or project>": the confirm card under an assistant message.
+  const [addCards, setAddCards] = useState<Record<number, AddMemberIntent>>({});
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // Topics the save-as-a-page offer was already shown for in this chat.
@@ -459,7 +471,10 @@ export default function AssistantChat() {
   useEffect(fitInput, [input]);
 
   // `stay`: a "Follow this topic" click. The page behind keeps its search.
-  const send = async (text: string, opts: { stay?: boolean } = {}) => {
+  // `typed`: the person typed this in the box. Only then may it become an action
+  // (add a member): never a starter, a related question, a choice button or a
+  // message another page sent in, since those carry text the person didn't write.
+  const send = async (text: string, opts: { stay?: boolean; typed?: boolean } = {}) => {
     const content = text.trim();
     if (!content || typing || !user) return;
     // The search is whatever the backend reports it ran; until then, a guess
@@ -502,6 +517,47 @@ export default function AssistantChat() {
       }
       return;
     }
+    // A message with an email address is NEVER a research question: it is not
+    // searched, never becomes an Explore URL and never goes to the backend turn
+    // (routeForMessage; /api/assistant refuses it too). Typed by the person, it may be
+    // "add <email> to <team or project>": the strict parser first, then the model,
+    // which only extracts; the email and the name must be in what was typed, and the
+    // card changes nothing until Confirm. Otherwise the panel says what an email can
+    // be used for.
+    const route = routeForMessage(content, !!opts.typed);
+    if (route !== "research") {
+      const chat = chatId.current;
+      setInput("");
+      setPickerAt(null);
+      setAction(null);
+      setDraft(null);
+      setPhase({ kind: "idle" });
+      setError(null);
+      let addIntent: AddMemberIntent | null = null;
+      if (route === "extract") {
+        addIntent = parseAddMemberIntent(content);
+        if (!addIntent) {
+          setMessages(next);
+          setProgress(PROGRESS_THINK);
+          setTyping(true);
+          addIntent = await extractAddMemberIntent(content);
+          setTyping(false);
+          if (chat !== chatId.current) return; // New chat started meanwhile
+        }
+      }
+      const index = next.length;
+      if (addIntent) {
+        const intent = addIntent;
+        // The confirm line comes only once the card has something to confirm
+        // (onOutcome below).
+        setMessages([...next, { role: "assistant", content: addMemberLookingReply(intent) }]);
+        setAddCards((c) => ({ ...c, [index]: intent }));
+      } else {
+        setMessages([...next, { role: "assistant", content: EMAIL_HELP_REPLY }]);
+      }
+      return;
+    }
+
     // A community request (or the answer to "which topic?") is not an Explore
     // search: no panel search, no page move, no cards / facts / "Follow this topic" strip / Related.
     const communityTurn = isCommunityTurn(next);
@@ -522,7 +578,8 @@ export default function AssistantChat() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: next,
+          // Never an earlier message with an email address in it (or its reply).
+          messages: messagesForResearch(next),
           context: {
             ...(query ? { query } : {}),
             ...(pageCreated ? { page_created: true } : {}),
@@ -812,6 +869,7 @@ export default function AssistantChat() {
     setTeam(null);
     setTeamCards({});
     setTeamLists({});
+    setAddCards({});
     setDraftStage("edit");
     setAutoSend(null);
     skipDup.current = null;
@@ -1072,6 +1130,14 @@ export default function AssistantChat() {
                     />
                   )}
                   {teamCards[i]?.kind === "list" && teamLists[i] && <TeamListCard state={teamLists[i]} />}
+                  {addCards[i] && (
+                    <AddMemberCard
+                      intent={addCards[i]}
+                      onOutcome={(o) =>
+                        setMessages((all) => all.map((x, j) => (j === i ? { ...x, content: addMemberReplyFor(o) } : x)))
+                      }
+                    />
+                  )}
 
                   {/* The assistant's sentence first, then the matches it introduces. */}
                   {cards[i] && (
@@ -1337,7 +1403,7 @@ export default function AssistantChat() {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                void send(input);
+                void send(input, { typed: true });
               }}
               className="flex items-end gap-2 rounded-2xl border border-outline-variant/40 bg-white pl-4 pr-2 py-2 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary transition-all"
             >
@@ -1349,7 +1415,7 @@ export default function AssistantChat() {
                   // Enter sends; Shift+Enter makes a new line.
                   if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                     e.preventDefault();
-                    void send(input);
+                    void send(input, { typed: true });
                   }
                 }}
                 rows={1}
