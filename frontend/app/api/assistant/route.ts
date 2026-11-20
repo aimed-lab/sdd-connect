@@ -3,7 +3,7 @@ import { getCurrentUser, getSession } from "@/lib/auth";
 import { realProjectOps, statusOfMyProjects } from "@/lib/server/agent/agentProjectOps";
 import { formatStatusReply, projectStatusQuestion } from "@/lib/server/projectWorkspace/statusReply";
 import { buildAssistantContext, cleanMessagesForSend } from "@/lib/server/assistant/assistantReply";
-import { EMAIL_HELP_REPLY, hasEmailAddress, messagesForResearch } from "@/lib/server/assistant/actionIntent";
+import { EMAIL_HELP_REPLY, isLocalOnlyMessage, messagesForResearch } from "@/lib/server/assistant/actionIntent";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
 import { ASSISTANT_MAX_REQUESTS, ASSISTANT_WINDOW_MS, clientIp, createRateLimiter } from "@/lib/server/rateLimit";
 
@@ -45,10 +45,10 @@ export async function POST(req: Request) {
   const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
 
   const all = cleanMessagesForSend(record.messages);
-  // A message with an email address is never a research question: it is not
-  // searched and never reaches the backend (the panel handles it first, this is
-  // the backstop). Earlier ones are left out of the history sent on.
-  if (all.length > 0 && all[all.length - 1].role === "user" && hasEmailAddress(all[all.length - 1].content)) {
+  // A message with an email address, or a file request, is never a research
+  // question: it is not searched and never reaches the backend (the panel handles
+  // it first, this is the backstop). Earlier ones are left out of the history sent on.
+  if (all.length > 0 && all[all.length - 1].role === "user" && isLocalOnlyMessage(all[all.length - 1].content)) {
     return NextResponse.json({ reply: EMAIL_HELP_REPLY });
   }
   const messages = messagesForResearch(all);

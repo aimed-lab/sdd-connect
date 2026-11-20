@@ -83,6 +83,17 @@ import {
   type AddMemberIntent,
 } from "@/lib/server/assistant/actionIntent";
 import { AddMemberCard, extractAddMemberIntent } from "@/components/explore/ActionCards";
+import { AddFileCard, extractFilePlace } from "@/components/explore/FileActionCards";
+import {
+  ATTACH_ACCEPT,
+  attachProblem,
+  attachmentLabel,
+  fileReplyFor,
+  fileTurnContent,
+  lookingLine,
+  parseFilePlaceIntent,
+  type FilePlaceIntent,
+} from "@/lib/server/assistant/fileIntent";
 import { listMyTeamsAction } from "@/app/teams/actions";
 import { createCommunityAction, joinCommunityAction } from "@/app/communities/actions";
 import { ASSISTANT_EVENT, getPageTeam, parseAssistantRequest, shownUserText, type AssistantRequest, type AssistantTeam } from "@/lib/server/assistant/assistantBridge";
@@ -342,6 +353,13 @@ export default function AssistantChat() {
   const [teamLists, setTeamLists] = useState<Record<number, TeamListState>>({});
   // "add <email> to <team or project>": the confirm card under an assistant message.
   const [addCards, setAddCards] = useState<Record<number, AddMemberIntent>>({});
+  // A file attached to the next message. It stays in the browser: nothing uploads
+  // until Confirm on the file card.
+  const [attached, setAttached] = useState<File | null>(null);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const attachRef = useRef<HTMLInputElement>(null);
+  // "add this file to <place>": the file card under an assistant message.
+  const [fileCards, setFileCards] = useState<Record<number, { file: File; intent: FilePlaceIntent }>>({});
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // Topics the save-as-a-page offer was already shown for in this chat.
@@ -475,11 +493,48 @@ export default function AssistantChat() {
   // (add a member): never a starter, a related question, a choice button or a
   // message another page sent in, since those carry text the person didn't write.
   const send = async (text: string, opts: { stay?: boolean; typed?: boolean } = {}) => {
-    const content = text.trim();
+    // A file attached to a TYPED message makes it a file request (a chip or another
+    // page's message never picks up the attachment). Sent with nothing typed, it
+    // reads as "add this" (no place named: the card shows a picker).
+    const withFile = opts.typed ? attached : null;
+    const content = text.trim() || (withFile ? "add this" : "");
     if (!content || typing || !user) return;
     // The search is whatever the backend reports it ran; until then, a guess
     // (used only to pick the progress text, and by an older backend).
-    const next: ChatMessage[] = [...messages, { role: "user", content }];
+    const next: ChatMessage[] = [
+      ...messages,
+      { role: "user", content: withFile ? fileTurnContent(content, withFile.name) : content },
+    ];
+
+    // "add this file to <community, team or project>". Never research: no search, no
+    // Explore URL, no backend turn (the message carries the file-turn mark, which
+    // messagesForResearch and /api/assistant also refuse). The strict parser first,
+    // then the model, which sees only the typed text, never the file.
+    if (withFile) {
+      const chat = chatId.current;
+      setInput("");
+      setAttached(null);
+      setAttachError(null);
+      setPickerAt(null);
+      setAction(null);
+      setDraft(null);
+      setPhase({ kind: "idle" });
+      setError(null);
+      let placeIntent = parseFilePlaceIntent(content);
+      if (!placeIntent) {
+        setMessages(next);
+        setProgress(PROGRESS_THINK);
+        setTyping(true);
+        placeIntent = await extractFilePlace(content);
+        setTyping(false);
+        if (chat !== chatId.current) return; // New chat started meanwhile
+      }
+      const intent = placeIntent;
+      const index = next.length;
+      setMessages([...next, { role: "assistant", content: lookingLine(intent) }]);
+      setFileCards((c) => ({ ...c, [index]: { file: withFile, intent } }));
+      return;
+    }
 
     // A clear team command: answer it here. No backend call, no search, no
     // page move, no "Follow this topic" strip, no Related questions.
@@ -870,6 +925,9 @@ export default function AssistantChat() {
     setTeamCards({});
     setTeamLists({});
     setAddCards({});
+    setFileCards({});
+    setAttached(null);
+    setAttachError(null);
     setDraftStage("edit");
     setAutoSend(null);
     skipDup.current = null;
@@ -1130,6 +1188,19 @@ export default function AssistantChat() {
                     />
                   )}
                   {teamCards[i]?.kind === "list" && teamLists[i] && <TeamListCard state={teamLists[i]} />}
+                  {fileCards[i] && (
+                    <AddFileCard
+                      file={fileCards[i].file}
+                      intent={fileCards[i].intent}
+                      signedIn={!!user}
+                      authLoading={authLoading}
+                      onOutcome={(o) =>
+                        setMessages((all) =>
+                          all.map((x, j) => (j === i ? { ...x, content: o.kind === "line" ? o.text : fileReplyFor(o) } : x))
+                        )
+                      }
+                    />
+                  )}
                   {addCards[i] && (
                     <AddMemberCard
                       intent={addCards[i]}
@@ -1400,13 +1471,66 @@ export default function AssistantChat() {
           </div>
 
           <div className="px-5 pt-3 pb-3 bg-white border-t border-outline-variant/30">
+            {(attached || attachError) && (
+              <div className="mb-2 flex flex-col gap-1">
+                {attached && (
+                  <span className="self-start inline-flex items-center gap-1.5 max-w-full rounded-full border border-outline-variant/40 bg-white pl-3 pr-1 py-1 font-label-sm text-label-sm text-on-background">
+                    <span className="material-symbols-outlined text-[16px] text-primary" aria-hidden>
+                      attach_file
+                    </span>
+                    <span className="truncate">{attachmentLabel(attached.name, attached.size)}</span>
+                    <button
+                      type="button"
+                      onClick={() => setAttached(null)}
+                      aria-label={`Remove ${attached.name}`}
+                      className="w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-secondary hover:text-error"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">close</span>
+                    </button>
+                  </span>
+                )}
+                {attachError && (
+                  <p className="font-body-sm text-body-sm text-error" role="alert">
+                    {attachError}
+                  </p>
+                )}
+              </div>
+            )}
             <form
               onSubmit={(e) => {
                 e.preventDefault();
                 void send(input, { typed: true });
               }}
-              className="flex items-end gap-2 rounded-2xl border border-outline-variant/40 bg-white pl-4 pr-2 py-2 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary transition-all"
+              className="flex items-end gap-2 rounded-2xl border border-outline-variant/40 bg-white pl-2 pr-2 py-2 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary transition-all"
             >
+              <button
+                type="button"
+                onClick={() => attachRef.current?.click()}
+                disabled={busy}
+                aria-label="Attach a file"
+                title="Attach a file to add to a community, team or project"
+                className="w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-secondary hover:text-primary disabled:opacity-40 transition-colors"
+              >
+                <span className="material-symbols-outlined text-[20px]">attach_file</span>
+              </button>
+              <input
+                ref={attachRef}
+                type="file"
+                accept={ATTACH_ACCEPT}
+                tabIndex={-1}
+                aria-label="Choose a file to attach"
+                className="sr-only"
+                onChange={(e) => {
+                  // One file at a time; it stays in the browser until Confirm.
+                  const f = e.target.files?.[0] ?? null;
+                  e.target.value = "";
+                  if (!f) return;
+                  const problem = attachProblem(f.name, f.type, f.size);
+                  setAttachError(problem);
+                  setAttached(problem ? null : f);
+                  if (!problem) setFocusTick((t) => t + 1);
+                }}
+              />
               <textarea
                 ref={inputRef}
                 value={input}
@@ -1420,14 +1544,14 @@ export default function AssistantChat() {
                 }}
                 rows={1}
                 maxLength={500}
-                placeholder="Ask about a topic or your research"
+                placeholder={attached ? "Where should this file go? e.g. add this to my team" : "Ask about a topic or your research"}
                 aria-label="Message"
                 className="flex-1 min-w-0 resize-none bg-transparent border-0 outline-none focus:ring-0 py-1.5 font-body-md text-body-md placeholder:text-secondary/50 max-h-32"
               />
               <button
                 type="submit"
                 aria-label="Send"
-                disabled={busy || !input.trim()}
+                disabled={busy || (!input.trim() && !attached)}
                 className="w-10 h-10 shrink-0 rounded-full bg-primary text-on-primary flex items-center justify-center disabled:opacity-40 hover:opacity-90 transition-opacity"
               >
                 <span className="material-symbols-outlined text-[20px]">arrow_upward</span>

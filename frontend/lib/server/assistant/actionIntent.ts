@@ -144,14 +144,29 @@ export function routeForMessage(text: string, typed: boolean): "extract" | "help
   return typed && (text ?? "").trim().length <= MAX_MESSAGE ? "extract" : "help";
 }
 
+/** The line added to a file request's user message (lib/server/assistant/fileIntent.ts).
+ *  It marks the turn as local: never sent to research, refused by /api/assistant. Kept
+ *  in the message itself so it still holds after the chat is restored from storage. */
+export const FILE_TURN_MARK = "Attached file: ";
+
+export function isFileTurn(content: string): boolean {
+  return (content ?? "").includes(`\n\n${FILE_TURN_MARK}`);
+}
+
+/** Never research: a message with an email address, or a file request. */
+export function isLocalOnlyMessage(content: string): boolean {
+  return hasEmailAddress(content) || isFileTurn(content);
+}
+
 /** The history sent to the research backend: without any user message that contains
- *  an email address, and without the assistant reply that followed it. */
+ *  an email address or is a file request, and without the assistant reply that
+ *  followed it. */
 export function messagesForResearch<M extends { role: string; content: string }>(messages: M[]): M[] {
   const out: M[] = [];
   let skipReply = false;
   for (const m of messages) {
     if (m.role === "user") {
-      skipReply = hasEmailAddress(m.content);
+      skipReply = isLocalOnlyMessage(m.content);
       if (!skipReply) out.push(m);
     } else if (skipReply) {
       skipReply = false;

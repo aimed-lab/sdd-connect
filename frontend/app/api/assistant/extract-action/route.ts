@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { groqComplete, RateLimitedError } from "@/lib/server/promote/groqCall";
 import { ServerConfigError } from "@/lib/server/supabaseServer";
 import { acceptExtractedIntent, hasEmailAddress } from "@/lib/server/assistant/actionIntent";
+import { acceptExtractedPlace } from "@/lib/server/assistant/fileIntent";
 import { ASSISTANT_MAX_REQUESTS, ASSISTANT_WINDOW_MS, clientIp, createRateLimiter } from "@/lib/server/rateLimit";
 
 // POST /api/assistant/extract-action — for an add-member request the strict parser
@@ -34,6 +35,17 @@ const SYSTEM = [
   "Never invent an email or a name that is not in the message.",
 ].join("\n");
 
+// mode "file": a file is attached to the message. The model never sees the file or
+// anything about it, only the typed text, and returns only the place's name and type.
+const FILE_SYSTEM = [
+  "A researcher attached a file in an assistant and typed one message about where it should go. You do not see the file.",
+  "Extract the place they name: a community, a team or a project. A code such as C-103 is a project name.",
+  'Reply with JSON only: {"target_name": string|null, "target_type": "community"|"team"|"project"|null}.',
+  "target_name: copied exactly as written in the message, without words like 'the', 'my', 'community', 'team' or 'project'.",
+  'target_type: only if the message says which, else null.',
+  'If the message names no place, reply {"target_name": null, "target_type": null}. Never invent a name that is not in the message.',
+].join("\n");
+
 export async function POST(req: Request) {
   if (!(await getCurrentUser())) {
     return NextResponse.json({ error: "Sign in to use the assistant." }, { status: 401 });
@@ -45,13 +57,16 @@ export async function POST(req: Request) {
   if (text.length > MAX_BODY_BYTES) return NextResponse.json({ error: "Request too large." }, { status: 413 });
 
   let message = "";
+  let mode: "member" | "file" = "member";
   try {
-    const body = JSON.parse(text) as { message?: unknown };
+    const body = JSON.parse(text) as { message?: unknown; mode?: unknown };
     message = typeof body.message === "string" ? body.message.trim() : "";
+    if (body.mode === "file") mode = "file";
   } catch {
     return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
   }
   if (!message || message.length > MAX_MESSAGE_CHARS) return NextResponse.json({ intent: null });
+  if (mode === "file") return extractPlace(message);
   // Only messages with an email address come here; the model decides whether it is
   // an add request at all.
   if (!hasEmailAddress(message)) return NextResponse.json({ intent: null });
@@ -77,6 +92,33 @@ export async function POST(req: Request) {
     if (e instanceof ServerConfigError) console.error("extract-action: model not configured", e);
     else console.error("extract-action: model call failed", e);
     // Fail closed: no card; the message goes on as a normal question.
+    return NextResponse.json({ intent: null });
+  }
+}
+
+/** A file request the strict parser didn't read: the place's name and type, or no
+ *  place. acceptExtractedPlace keeps a name only if the message contains it. */
+async function extractPlace(message: string) {
+  try {
+    const raw = await groqComplete({
+      system: FILE_SYSTEM,
+      user: `Message: ${JSON.stringify(message)}\nReply in json.`,
+      maxTokens: 200,
+      temperature: 0,
+      label: "assistant-extract-place",
+      json: true,
+    });
+    let parsed: unknown = null;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = null;
+    }
+    return NextResponse.json({ intent: acceptExtractedPlace(parsed, message) });
+  } catch (e) {
+    if (e instanceof RateLimitedError) return NextResponse.json({ intent: null, error: e.message }, { status: 503 });
+    console.error("extract-action (file): model call failed", e);
+    // No name: the person picks from their places.
     return NextResponse.json({ intent: null });
   }
 }
